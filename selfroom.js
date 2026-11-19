@@ -24,6 +24,7 @@
     { urls: 'stun:stun.cloudflare.com:3478' }
   ];
   var PREFIX = 'pvu9x7';
+  var MIN_GAP = 12;   // 兩包之間最少間隔（毫秒）：平常一有資料就立刻送，只擋掉比這更密的
   var me = Math.random().toString(36).slice(2, 12);
   function now() { return performance.now(); }
 
@@ -85,7 +86,7 @@
   function makeRoom(name) {
     var R = {
       name: name, mine: {}, seq: 0, peers: {}, fns: [], cfns: [], dead: false,
-      dirty: false, timer: 0, lastRelay: 0, pendingNotify: false, lastConn: null, iv: 0
+      dirty: false, timer: 0, lastRelay: 0, lastFlush: 0, sigN: 0, pendingNotify: false, lastConn: null, iv: 0
     };
     var tp = PREFIX + '/' + name + '/p/', ts = PREFIX + '/' + name + '/s/';
 
@@ -99,7 +100,8 @@
     function notify() {
       if (R.pendingNotify || R.dead) return;
       R.pendingNotify = true;
-      requestAnimationFrame(function () {
+      // 收到就馬上交給遊戲，不等下一次畫面更新（那會平白多等最多一幀）
+      Promise.resolve().then(function () {
         R.pendingNotify = false;
         if (R.dead) return;
         var l = peerList();
@@ -110,7 +112,7 @@
     function getPeer(id) {
       var p = R.peers[id];
       if (!p) {
-        p = R.peers[id] = { id: id, seq: -1, pub: null, seen: now(), pc: null, dc: null, dcOpen: false, dcSeen: 0, retryAt: 0, tries: 0, via: 'relay' };
+        p = R.peers[id] = { id: id, seq: -1, pub: null, seen: now(), pc: null, dc: null, dcOpen: false, dcSeen: 0, retryAt: 0, tries: 0, via: 'relay', sigSeen: {}, pendC: [] };
         if (!NO_RTC && me < id) connectRtc(p);   // id 比較小的那一方負責發起直連
       }
       return p;
@@ -137,7 +139,7 @@
     }
 
     // ---------- 直連（WebRTC） ----------
-    function sig(to, d) { pubAll(ts + to, { from: me, d: d }); }
+    function sig(to, d) { pubAll(ts + to, { from: me, i: ++R.sigN, d: d }); }
 
     function closeRtc(p) {
       p.dcOpen = false;
@@ -159,7 +161,7 @@
     function newPc(p) {
       closeRtc(p);
       var pc = new RTCPeerConnection({ iceServers: ICE });
-      p.pc = pc;
+      p.pc = pc; p.pendC = [];
       pc.onicecandidate = function (e) { if (e.candidate && p.pc === pc) sig(p.id, { c: e.candidate }); };
       pc.onconnectionstatechange = function () {
         if (p.pc !== pc) return;
@@ -190,19 +192,34 @@
       if (NO_RTC || R.dead || !msg.d || typeof msg.from !== 'string') return;
       var p = getPeer(msg.from), d = msg.d;
       p.seen = now();
+      // 同一則訊號每個中繼都會送來一份，只處理第一份。
+      // 不這樣做的話，重複的 offer 會把剛建好的連線拆掉重建，兩邊對不上，直連永遠打不通。
+      if (typeof msg.i === 'number') {
+        if (p.sigSeen[msg.i]) return;
+        p.sigSeen[msg.i] = 1;
+      }
       try {
         if (d.sdp && d.sdp.type === 'offer') {
           var pc = newPc(p);
-          pc.setRemoteDescription(d.sdp).then(function () { return pc.createAnswer(); })
+          pc.setRemoteDescription(d.sdp).then(function () { drainCandidates(p, pc); return pc.createAnswer(); })
             .then(function (a) { return pc.setLocalDescription(a); })
             .then(function () { if (p.pc === pc) sig(p.id, { sdp: pc.localDescription }); }).catch(function () {});
         } else if (d.sdp && d.sdp.type === 'answer' && p.pc) {
-          p.pc.setRemoteDescription(d.sdp).catch(function () {});
+          var pc2 = p.pc;
+          pc2.setRemoteDescription(d.sdp).then(function () { drainCandidates(p, pc2); }).catch(function () {});
         } else if (d.c && p.pc) {
-          p.pc.addIceCandidate(d.c).catch(function () {});
+          // 對方的描述還沒套用完就先到的候選位址：先存著，免得被丟掉
+          if (p.pc.remoteDescription) p.pc.addIceCandidate(d.c).catch(function () {});
+          else p.pendC.push(d.c);
         }
       } catch (e) {}
     };
+
+    function drainCandidates(p, pc) {
+      if (p.pc !== pc) return;
+      var q = p.pendC; p.pendC = [];
+      q.forEach(function (c) { pc.addIceCandidate(c).catch(function () {}); });
+    }
 
     // ---------- 送出 ----------
     R.flush = function (force) {
@@ -217,6 +234,7 @@
       });
       // 沒有直連的對象走中繼；就算全部都直連，也每秒經中繼送一次（讓新加入的人看得到、直連斷掉時無縫接手）
       var t = now();
+      R.lastFlush = t;
       if (needRelay || force || t - R.lastRelay > 1000) {
         R.lastRelay = t;
         pubRaw(tp + me, s);
@@ -229,7 +247,13 @@
       for (var k in patch) { if (patch[k] === null) delete next[k]; else next[k] = patch[k]; }
       R.mine = next;
       R.dirty = true;
-      if (!R.timer) R.timer = setTimeout(function () { R.timer = 0; if (R.dirty) R.flush(false); }, 30);
+      if (!R.timer) {
+        // 立刻送出（同一輪裡的多次更新合併成一包）；只有送得比 MIN_GAP 還密才延後
+        var go = function () { R.timer = 0; if (R.dirty) R.flush(false); };
+        var wait = MIN_GAP - (now() - R.lastFlush);
+        if (wait <= 0) { R.timer = -1; Promise.resolve().then(go); }
+        else R.timer = setTimeout(go, wait);
+      }
       return Promise.resolve();
     };
 

@@ -34,7 +34,6 @@
   var rooms = {};
 
   function anyBroker() { return clients.some(function (c) { return c.up; }); }
-  function primary() { for (var i = 0; i < clients.length; i++) if (clients[i].up) return clients[i]; return null; }
   function notifyConn() {
     lobbyFns.forEach(function (f) { try { f(lobby.connected()); } catch (e) {} });
     Object.keys(rooms).forEach(function (n) { rooms[n].connChanged(); });
@@ -74,14 +73,11 @@
     });
   }
 
-  function pubAll(topic, obj) {
-    var s = JSON.stringify(obj);
+  // 每個中繼都送：兩邊連得上的中繼不一定相同，只送一個的話對方可能完全收不到
+  function pubRaw(topic, s) {
     clients.forEach(function (c) { if (c.up) { try { c.cl.publish(topic, s, { qos: 0 }); } catch (e) {} } });
   }
-  function pubPrimary(topic, s) {
-    var c = primary();
-    if (c) { try { c.cl.publish(topic, s, { qos: 0 }); } catch (e) {} }
-  }
+  function pubAll(topic, obj) { pubRaw(topic, JSON.stringify(obj)); }
 
   // ------------------------------------------------------------
   // 房間
@@ -223,7 +219,7 @@
       var t = now();
       if (needRelay || force || t - R.lastRelay > 1000) {
         R.lastRelay = t;
-        if (force) pubAll(tp + me, JSON.parse(s)); else pubPrimary(tp + me, s);
+        pubRaw(tp + me, s);
       }
     };
 

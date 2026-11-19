@@ -140,7 +140,7 @@
 
     for (var i = 0; i < 2; i++) {
       var p = players[i], pp = prev.p[i];
-      var hit = !!p.isCollisionWithBallHappened;
+      var hit = !!(p.isCollisionWithBallHappened || p.pvHit);   // pvHit：大蔥鴨用大蔥打到（球沒碰到身體）
       if (hit && !pp.hit) onBallHit(ctrl, p, i, ball);
       pp.hit = hit;
 

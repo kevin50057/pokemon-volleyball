@@ -67,10 +67,11 @@
   // 球在接下來 3 幀內會不會碰到這隻角色（碰撞範圍是上下左右各 32，多留一點）
   function ballSoon(c, me) {
     var b = c.physics.ball, bx = b.x, by = b.y, bvy = b.yVelocity, py = me.y, pvy = me.yVelocity;
+    var leek = me.character === 'farfetchd', rx = leek ? 52 : 40, ry = leek ? 44 : 40;   // 大蔥鴨拿大蔥，構得到比較遠
     for (var k = 1; k <= 3; k++) {
       bx += b.xVelocity; by += bvy; bvy += 1;
       py = Math.min(244, py + pvy); pvy += 1;
-      if (Math.abs(bx - me.x) <= 40 && Math.abs(by - py) <= 40) return true;
+      if (Math.abs(bx - me.x) <= rx && Math.abs(by - py) <= ry) return true;
     }
     return false;
   }

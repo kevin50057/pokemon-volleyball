@@ -12,7 +12,7 @@
     { id: 'vaporeon',   name: '水伊布',   type: '水', ability: 'acidArmor',
       skill: '溶化滑行', desc: '可衝刺。撲救時留下水窪，球落在水窪上會自動彈起。' },
     { id: 'flareon',    name: '火伊布',   type: '火', ability: 'fireSmash',
-      skill: '烈焰重擊', desc: '殺球更往下砸，比較難接。' },
+      skill: '烈焰重擊＋引火', desc: '殺球是火球：對手用身體接到會灼傷 2 秒，這段時間內的下一次殺球會變弱（直接把火球殺回來就不會灼傷）。自己用身體接起對手的殺球會「引火」3 秒，這時殺球變成大字爆：又快又準、一定落在對面，灼傷也更久。' },
     { id: 'jolteon',    name: '雷伊布',   type: '電', ability: 'emWave',
       skill: '電光一閃', desc: '連按兩下左或右，瞬間閃過去一大段（地上、空中都可以，冷卻 2.4 秒）。閃完 0.4 秒內殺球，會變成又快又準的電光殺球。' },
     { id: 'gengar',     name: '耿鬼',     type: '鬼', ability: 'ghostPhase',
@@ -34,7 +34,7 @@
     { id: 'dugtrio',    name: '三地鼠',   type: '地', ability: 'dig',
       skill: '沙丘陷阱', desc: '移動快。起跳時留下沙丘，球落在沙丘上會亂彈不算分。' },
     { id: 'farfetchd',  name: '大蔥鴨',   type: '普', ability: 'leekBoomerang',
-      skill: '迴力大蔥', desc: '殺球又平又快，過網後還會往回飄。' },
+      skill: '大蔥揮擊＋居合斬', desc: '拿著大蔥，殺球打得到比別人遠的球，不用貼到身上。直接把對手的殺球殺回去就是居合斬：又快又準，一定落在對面。一般殺球又平又快，過網後還會往回飄。' },
     { id: 'psyduck',    name: '可達鴨',   type: '水', ability: 'headache',
       skill: '頭痛爆發', desc: '走路偶爾跌倒。被得分、或接起對手的殺球都會累積頭痛，滿 3 層後下一次殺球是頭痛大爆發：必定打進對面，還讓對手頭暈一下。' },
     { id: 'magikarp',   name: '鯉魚王',   type: '水', ability: 'splash',
@@ -42,7 +42,7 @@
     { id: 'jigglypuff', name: '胖丁',     type: '妖', ability: 'sing',
       skill: '唱歌', desc: '落得很慢，像飄著一樣；在空中按「下」可以取消漂浮、快速落地。殺球讓對手左右顛倒 4 秒。' },
     { id: 'dragonite',  name: '快龍',     type: '龍', ability: 'outrage',
-      skill: '逆鱗', desc: '殺球後暴走 3 秒、移動變快；暴走中每次殺球疊一層，最多 3 層，一層比一層砸得重。暴走結束會混亂 1 秒（左右顛倒）。' },
+      skill: '逆鱗', desc: '殺球就暴走 3 秒、移動變快，這一球算第一層；暴走中每次殺球再疊一層，最多 3 層（連殺 3 球就滿），一層比一層砸得重。暴走結束會混亂 1 秒（左右顛倒）。' },
     { id: 'mew',        name: '夢幻',     type: '超', ability: 'psychicShield',
       skill: '瞬間移動＋念力護盾', desc: '神獸。連按兩下方向鍵瞬間移動：球會落在自己場上就往落點瞬移（有距離上限，每 6 秒一次）。身邊有粉紅光環時，快落地的球一定會被念力托起（每 20 秒一次）；趁球還帶著光環殺球就是念力彈，又快又準。' }
   ];

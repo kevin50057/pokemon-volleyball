@@ -33,6 +33,10 @@
     vaporeonAIDashChance: 0.05, // 每幀衝刺的機率（太常衝刺會強到不平衡）
     // 火伊布／耿鬼：在這個引擎裡「球更快」反而容易出界，所以改成「往下砸」
     fireSmash: 1.0, fireDown: 4,
+    // 火伊布：灼傷幾幀（50 = 2 秒）、灼傷時殺球剩幾成力、引火持續幾幀、大字爆的最大球速、大字爆的灼傷幾幀
+    burnFrames: 50, burnWeak: 0.7, flashFireFrames: 75, fireBlastVx: 26, fireBlastBurn: 90,
+    // 大蔥鴨：大蔥揮擊打得到多遠（一般角色的判定是 32）、居合斬的最大球速
+    leekReachX: 54, leekReachY: 44, iaiVx: 28, leekAI: 0.5,
     shadowBall: 1.0, shadowDown: 3,
     // 超夢
     psychicDrop: 15, psychicReverse: 1.0, psychicAim: 0.65, psychicCooldown: 150, mewtwoSpeed: 2,  // 超夢是 Boss，目標勝率約 65%～70%
@@ -77,6 +81,8 @@
   // 「接到對手的殺球」判斷：遊戲本體在球被碰到的那一幀就把 isPowerHit 清掉，
   // 所以要記住上一幀球是不是殺球、是誰殺的
   var ballMem = { prevPower: false, prevVx: 0, lastPowerSide: null };
+  // 這一幀開始時，「對手殺過來、還沒被碰過的球」是衝著誰來的（大蔥鴨的居合斬用）
+  var incoming = { p1: false, p2: false };
   function receivedSpike(player) {
     return player.isCollisionWithBallHappened && player.state !== 2 &&
       ballMem.prevPower && ballMem.lastPowerSide !== pk(player);
@@ -194,15 +200,23 @@
     lastScoreSum = sum;
 
     trackOrigin(p1); trackOrigin(p2);
+    p1.pvHit = p2.pvHit = false;   // 「沒碰到身體但算擊球」的記號（大蔥揮擊），給 juice.js 和 netplay.js 看
     if (p1.isCollisionWithBallHappened) lastHitter = p1;
     else if (p2.isCollisionWithBallHappened) lastHitter = p2;
 
     if (!inMenu) {
+      incoming.p1 = ballMem.prevPower && ballMem.lastPowerSide === 'p2';
+      incoming.p2 = ballMem.prevPower && ballMem.lastPowerSide === 'p1';
+      // 大蔥揮擊要在所有技能之前算：它等於「這一幀碰到球了」，後面的判斷才會一致
+      leekReach(p1, ball, ctrl.keyboardArray[0]);
+      leekReach(p2, ball, ctrl.keyboardArray[1]);
       [p1, p2].forEach(function (p) {
         if (p.isCollisionWithBallHappened && ball.isPowerHit) ballMem.lastPowerSide = pk(p);
       });
       processAbility(p1, p2, ball, ctrl.keyboardArray[0], 'p1', ctrl);
       processAbility(p2, p1, ball, ctrl.keyboardArray[1], 'p2', ctrl);
+      processBurn(p1, ball, 'p1');
+      processBurn(p2, ball, 'p2');
       processDebuffs(p1, ctrl.keyboardArray[0], 'p1');
       processDebuffs(p2, ctrl.keyboardArray[1], 'p2');
       ballMem.prevPower = !!ball.isPowerHit;
@@ -216,6 +230,43 @@
     if (player.character !== m.transformedTo) {
       m.origin = player.character;   // 玩家從選單換了角色
       m.transformedTo = null;
+    }
+  }
+
+  // 大蔥鴨「大蔥揮擊」：殺球姿勢中，球不用碰到身體，在大蔥構得到的範圍內就打得到。
+  // 做的事跟遊戲本體的殺球一樣（方向鍵決定球路），之後再交給 leekBoomerang 加上平快與回飄
+  function leekReach(player, ball, input) {
+    if (player.character !== 'farfetchd') return;
+    var s = state[pk(player)];
+    if (player.state !== 2) { s.leekSwung = false; return; }
+    if (player.isCollisionWithBallHappened) { s.leekSwung = true; return; }   // 身體已經打到了
+    if (s.leekSwung) return;                                                  // 一次揮擊只打一球
+    if (Math.abs(ball.x - player.x) > TUNING.leekReachX || Math.abs(ball.y - player.y) > TUNING.leekReachY) return;
+    var mine = player.isPlayer2 ? ball.x >= NET_X : ball.x < NET_X;           // 不能伸過網去打
+    if (!mine || ball.y >= GROUND_BALL_Y - 2) return;
+    s.leekSwung = true;
+    ball.xVelocity = (player.isPlayer2 ? -1 : 1) * (Math.abs(input.xDirection) + 1) * 10;
+    ball.yVelocity = Math.max(15, Math.abs(ball.yVelocity)) * input.yDirection * 2;
+    ball.sound.powerHit = true;
+    ball.isPowerHit = true;
+    ball.punchEffectRadius = 20; ball.punchEffectX = ball.x; ball.punchEffectY = ball.y;
+    player.isCollisionWithBallHappened = true;   // 這一幀的技能判斷用；物理算完就會被清掉，所以另外留 pvHit
+    player.pvHit = true;
+    lastHitter = player;      // 球的屬性光跟著換成大蔥鴨的
+    s.slash = { x: player.x, y: player.y, bx: ball.x, by: ball.y, t: 5 };
+  }
+
+  // 灼傷（火伊布造成）：時間內的第一次殺球會變弱，打完灼傷就解除
+  function processBurn(player, ball, key) {
+    var s = state[key];
+    if (!(s.burnTimer > 0)) { s.burnHit = false; return; }
+    s.burnTimer--;
+    if (edge(s, 'burnHit', player.isCollisionWithBallHappened && player.state === 2) && ball.isPowerHit) {
+      ball.xVelocity = Math.round(ball.xVelocity * TUNING.burnWeak);
+      ball.yVelocity = Math.round(ball.yVelocity * TUNING.burnWeak);
+      ball.isPowerHit = false;
+      s.burnTimer = 0;
+      pushBurst(ball.x, ball.y, '#9E9E9E', 45);
     }
   }
 
@@ -274,6 +325,13 @@
       if (s.tpCD > 0) return;
       var target = ball.expectedLandingPointX, mySide = p.isPlayer2 ? target > NET_X : target < NET_X;
       if (p.state === 0 && mySide && Math.abs(target - p.x) > 90 && Math.random() < TUNING.mewTeleportAI) s.zipRequest = target > p.x ? 1 : -1;
+    },
+    // 大蔥鴨：在空中、球進到大蔥構得到的範圍就揮（不用等球貼到身上）
+    farfetchd: function (p, ball, opp, input, s) {
+      if (p.state !== 1 || s.leekSwung) return;
+      var mine = p.isPlayer2 ? ball.x >= NET_X : ball.x < NET_X;
+      if (mine && Math.abs(ball.x - p.x) < TUNING.leekReachX - 6 && Math.abs(ball.y - p.y) < TUNING.leekReachY - 6 &&
+          Math.random() < TUNING.leekAI) input.powerHit = 1;
     },
     // 卡比獸：跳不高，球還在高處時不要起跳，等球掉下來用肚子接
     snorlax: function (p, ball, opp, input) {
@@ -351,12 +409,39 @@
       }
     },
 
-    // 火伊布：殺球 1.4 倍
-    fireSmash: function (player, opp, ball, input, s) {
+    // 火伊布「烈焰重擊＋引火」
+    //  - 殺出去的球是火球：對手用身體接到就灼傷（下一次殺球變弱）；直接把火球殺回來的話不會灼傷
+    //  - 引火：自己用身體接起對手的殺球，就火力全開一小段時間，這時殺球是「大字爆」：一定落在對面場內、灼傷更久
+    fireSmash: function (player, opp, ball, input, s, oppS) {
+      if (edge(s, 'absorb', receivedSpike(player))) {
+        s.flashFire = TUNING.flashFireFrames;
+        pushBurst(player.x, player.y, '#FF5A1F', 70);
+      }
+      if (s.flashFire > 0) s.flashFire--;
       if (powerHitEdge(player, s, 'hit') && ball.isPowerHit) {
-        ball.xVelocity = clampV(Math.round(ball.xVelocity * TUNING.fireSmash));
-        if (TUNING.fireDown) ball.yVelocity = clampV(ball.yVelocity + TUNING.fireDown);
-        ball.punchEffectRadius = Math.min(ball.punchEffectRadius + 10, 35);
+        var blast = s.flashFire > 0;
+        if (blast) aimAtCourt(ball, player.isPlayer2, TUNING.fireBlastVx);   // 大字爆：單純再往下砸會掛網，所以改成瞄準對面
+        else {
+          ball.xVelocity = clampV(Math.round(ball.xVelocity * TUNING.fireSmash));
+          if (TUNING.fireDown) ball.yVelocity = clampV(ball.yVelocity + TUNING.fireDown);
+        }
+        ball.punchEffectRadius = Math.min(ball.punchEffectRadius + (blast ? 18 : 10), 40);
+        s.fireBall = blast ? 2 : 1;
+        if (blast) {
+          s.flashFire = 0;
+          pushBurst(ball.x, ball.y, '#FF5A1F', 85);
+          pushFlash('#FF5A1F', 0.25, 6);
+          tier(player, 3, ball.x, ball.y);
+        }
+      }
+      if (s.fireBall) {
+        if (edge(s, 'oppTouch', opp.isCollisionWithBallHappened)) {
+          if (opp.state !== 2) {
+            oppS.burnTimer = s.fireBall === 2 ? TUNING.fireBlastBurn : TUNING.burnFrames;
+            pushBurst(opp.x, opp.y, '#FF5A1F', 55);
+          }
+          s.fireBall = 0;
+        } else if (ball.y >= GROUND_BALL_Y - 2 || (player.isCollisionWithBallHappened && player.state !== 2)) s.fireBall = 0;
       }
     },
 
@@ -602,19 +687,32 @@
       }
     },
 
-    // 大蔥鴨：平快殺球，過網後回飄
+    // 大蔥鴨「大蔥揮擊＋居合斬＋迴力大蔥」
+    //  - 大蔥揮擊：殺球打得到比別人遠的球（leekReach，在每幀最前面處理）
+    //  - 居合斬：直接把對手的殺球殺回去，變成又快又準、一定落在對面的一刀
+    //  - 迴力大蔥：一般殺球又平又快，過網後還會往回飄
     leekBoomerang: function (player, opp, ball, input, s) {
-      if (powerHitEdge(player, s, 'hit')) {
-        if (ball.isPowerHit) {
+      if (powerHitEdge(player, s, 'hit') && ball.isPowerHit) {
+        if (incoming[pk(player)]) {
+          aimAtCourt(ball, player.isPlayer2, TUNING.iaiVx);
+          ball.punchEffectRadius = 35;
+          s.boomerangTimer = 0;
+          if (!s.slash) s.slash = { x: player.x, y: player.y, bx: ball.x, by: ball.y, t: 5 };
+          s.slash.iai = 1; s.slash.t = 7;
+          pushBurst(ball.x, ball.y, '#E8F5E9', 80);
+          pushFlash('#FFFFFF', 0.3, 5);
+          tier(player, 3, ball.x, ball.y);
+        } else {
           ball.yVelocity = Math.round(ball.yVelocity * 0.3);
           ball.xVelocity = clampV(Math.round(ball.xVelocity * 1.5));
+          s.boomerangTimer = 20;
         }
-        s.boomerangTimer = 20;
       }
       if (s.boomerangTimer > 0 && --s.boomerangTimer === 0) {
         var crossed = player.isPlayer2 ? ball.x < NET_X : ball.x > NET_X;
         if (crossed) ball.xVelocity = clampV(Math.round(-ball.xVelocity * 0.6));
       }
+      if (s.slash && --s.slash.t <= 0) s.slash = null;
     },
 
     // 可達鴨：偶爾跌倒；累積頭痛後爆發
@@ -747,7 +845,7 @@
     },
 
     // 快龍：殺球後暴走
-    // 快龍「逆鱗」：殺球後暴走。暴走中每次殺球疊一層（最多 3 層），一層比一層砸得更重更快；
+    // 快龍「逆鱗」：殺球後暴走，那一球就是第一層。暴走中每次殺球再疊一層（最多 3 層），一層比一層砸得更重更快；
     // 暴走結束後會混亂（左右顛倒）一下，跟原作的逆鱗一樣有代價
     outrage: function (player, opp, ball, input, s) {
       moveBonus(player, input, 1);
@@ -755,13 +853,17 @@
         if (!(s.outrageTimer > 0)) {
           pushBurst(player.x, player.y, '#FF6D00', 90);
           s.rageStacks = 0;
-        } else if (ball.isPowerHit) {
+        }
+        if (ball.isPowerHit) {
+          // 開啟暴走的那一球就算第一層：殺 3 球就到滿層（原本要 4 球）
           s.rageStacks = Math.min(3, (s.rageStacks || 0) + 1);
           ball.yVelocity = clampV(ball.yVelocity + TUNING.outrageDown * s.rageStacks);
           ball.xVelocity = clampV(Math.round(ball.xVelocity * (1 + 0.08 * s.rageStacks)));
           ball.punchEffectRadius = Math.min(ball.punchEffectRadius + 6 * s.rageStacks, 40);
-          pushBurst(ball.x, ball.y, '#FF6D00', 40 + 15 * s.rageStacks);
-          tier(player, s.rageStacks >= 3 ? 4 : 3, ball.x, ball.y, { k: 'rage' });   // 三層逆鱗＝必殺
+          if (s.rageStacks >= 2) {
+            pushBurst(ball.x, ball.y, '#FF6D00', 40 + 15 * s.rageStacks);
+            tier(player, s.rageStacks >= 3 ? 4 : 3, ball.x, ball.y, { k: 'rage' });   // 三層逆鱗＝必殺
+          }
         }
         s.outrageTimer = TUNING.outrageFrames;
       }
@@ -930,6 +1032,8 @@
       g.globalAlpha = 1;
     }
     if (s.auraTimer > 0) ring(g, ball.x, ball.y, 26, '#FF80AB', 0.8);
+    if (s.fireBall) fireTrail(g, ball, s.fireBall === 2);
+    if (s.slash) slashArc(g, s.slash);
     if (s.charged) zap(g, ball.x, ball.y);
     if (s.bombTimer > 0 && s.bombTimer % 4 < 2) ring(g, ball.x, ball.y, 22, '#FF1744', 0.9);
   }
@@ -961,6 +1065,23 @@
       g.globalAlpha = 0.5 + 0.15 * st; g.strokeStyle = st >= 3 ? '#FF1744' : '#FF6D00'; g.lineWidth = 2 + st * 1.5;
       g.beginPath(); g.arc(x, player.y, 34 + (tick % 4), 0, Math.PI * 2); g.stroke(); g.globalAlpha = 1;
       for (var rs = 0; rs < 3; rs++) flame(g, x - 12 + rs * 12, top - 4, rs < st);
+    }
+    if (s.flashFire > 0) {             // 火伊布引火：火力全開，身邊冒火
+      var blink = s.flashFire < 20 && s.flashFire % 4 < 2;
+      if (!blink) {
+        ring(g, x, player.y, 32 + Math.sin(tick / 2) * 2, '#FF5A1F', 0.75);
+        for (var em = 0; em < 4; em++) {
+          var ph = (tick * 3 + em * 11) % 30;
+          flame(g, x - 21 + em * 14, player.y + 24 - ph, true, 0.55 + (30 - ph) / 60);
+        }
+      }
+    }
+    if (s.burnTimer > 0) {             // 灼傷：身上竄火、頭上一朵火（快結束時閃爍）
+      for (var bf = 0; bf < 2; bf++) {
+        var bp = (tick * 2 + bf * 9) % 18;
+        flame(g, x - 10 + bf * 20 + Math.sin(tick + bf) * 2, player.y + 10 - bp, true, 0.6);
+      }
+      if (!(s.burnTimer < 15 && s.burnTimer % 4 < 2)) flame(g, x, top - 2, true, 1.1);
     }
     if (s.reverseTimer > 0) {           // 繞著頭轉的音符
       for (var i = 0; i < 2; i++) {
@@ -1008,13 +1129,43 @@
   }
 
   // 逆鱗層數：亮的火焰＝已疊的層，暗的＝還沒疊
-  function flame(g, x, y, on) {
+  function flame(g, x, y, on, k) {
+    k = k || 1;
     g.beginPath();
-    g.moveTo(x, y - 7); g.quadraticCurveTo(x + 6, y, x + 3, y + 5); g.lineTo(x - 3, y + 5); g.quadraticCurveTo(x - 6, y, x, y - 7);
+    g.moveTo(x, y - 7 * k); g.quadraticCurveTo(x + 6 * k, y, x + 3 * k, y + 5 * k); g.lineTo(x - 3 * k, y + 5 * k); g.quadraticCurveTo(x - 6 * k, y, x, y - 7 * k);
     g.closePath();
     g.lineWidth = 2; g.strokeStyle = '#000'; g.stroke();
     g.fillStyle = on ? '#FF3D00' : 'rgba(255,255,255,0.25)'; g.fill();
-    if (on) { g.fillStyle = '#FFD54F'; g.beginPath(); g.arc(x, y + 2, 2, 0, Math.PI * 2); g.fill(); }
+    if (on) { g.fillStyle = '#FFD54F'; g.beginPath(); g.arc(x, y + 2 * k, 2 * k, 0, Math.PI * 2); g.fill(); }
+  }
+
+  // 火球：球後面拖著一串火（大字爆比較大）
+  function fireTrail(g, ball, big) {
+    var vx = ball.xVelocity, vy = ball.yVelocity, len = Math.sqrt(vx * vx + vy * vy) || 1;
+    var ux = -vx / len, uy = -vy / len, n = big ? 5 : 3;
+    for (var i = 0; i < n; i++) {
+      var d = 14 + i * 9, j = (Math.random() - 0.5) * 8;
+      g.globalAlpha = 0.95 - i * 0.15;
+      flame(g, ball.x + ux * d + j, ball.y + uy * d + j, true, (big ? 1.5 : 1.1) - i * 0.15);
+    }
+    g.globalAlpha = 1;
+    if (big) ring(g, ball.x, ball.y, 24 + Math.random() * 3, '#FF5A1F', 0.85);
+  }
+
+  // 大蔥揮擊：從大蔥鴨劃向球的一道弧光（居合斬是更粗的白光）
+  function slashArc(g, sl) {
+    var k = Math.max(0, sl.t) / (sl.iai ? 7 : 5);
+    var mx = (sl.x + sl.bx) / 2, my = (sl.y + sl.by) / 2, dx = sl.bx - sl.x, dy = sl.by - sl.y;
+    var len = Math.sqrt(dx * dx + dy * dy) || 1, nx = -dy / len, ny = dx / len, bow = sl.iai ? 26 : 18;
+    g.lineCap = 'round';
+    [[sl.iai ? 9 : 6, sl.iai ? '#FFFFFF' : '#C5E1A5', 0.55], [sl.iai ? 4 : 2.5, '#FFFFFF', 0.95]].forEach(function (w) {
+      g.globalAlpha = w[2] * k; g.strokeStyle = w[1]; g.lineWidth = w[0];
+      g.beginPath();
+      g.moveTo(sl.x - dx * 0.15 + nx * 6, sl.y - dy * 0.15 + ny * 6);
+      g.quadraticCurveTo(mx - nx * bow, my - ny * bow, sl.bx + dx * 0.35, sl.by + dy * 0.35);
+      g.stroke();
+    });
+    g.globalAlpha = 1; g.lineCap = 'butt';
   }
 
   function dot(g, x, y, r, color) {

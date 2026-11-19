@@ -818,7 +818,7 @@
     }
     var ph = c.physics;
     [ph.player1, ph.player2].forEach(function (p, i) {
-      var h = !!p.isCollisionWithBallHappened;
+      var h = !!(p.isCollisionWithBallHappened || p.pvHit);   // pvHit：大蔥鴨用大蔥打到
       if (h && !net.prevHit[i]) net.hit[i]++;
       net.prevHit[i] = h;
     });

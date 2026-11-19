@@ -55,6 +55,13 @@
   function r1(v) { return Math.round((+v || 0) * 10) / 10; }
   function num(v) { v = +v; return isFinite(v) ? v : 0; }
   function ctrlOf() { return window._pv && window._pv.ctrl; }
+  // 遊戲本體要等第一個畫面的「開始」被按下才會載入。玩家可能沒按就直接進房間，
+  // 這樣開局時沒有遊戲可以進入（客人卡在等待、房主以為對手斷線），所以幫他按。
+  function ensureGame() {
+    if (ctrlOf()) return;
+    var box = document.getElementById('about-box'), btn = document.getElementById('close-about-btn');
+    if (box && btn && !box.classList.contains('hidden')) btn.click();   // 已經隱藏＝載入中，不用再按
+  }
   function validCh(c) { return typeof c === 'string' && VALID[c] === true ? c : 'pikachu'; }
   function selectedChar(n) {
     if (!CH) return 'pikachu';
@@ -380,6 +387,7 @@
 
   function start(role, code) {
     if (net.phase !== 'off') stop();
+    ensureGame();
     var token = ++conn.token;   // 每次開始一個新的 token；舊的 join 結果回來就丟掉
     status(T.connecting);
     getRoom().then(function (room) {
@@ -660,7 +668,7 @@
     if (pr.ph === 'play' && net.prevPh === 'end') closePanel();
     if ((pr.ph === 'play' || pr.ph === 'end') && pr.s) {
       var c = ctrlOf();
-      if (!c) return;
+      if (!c) { ensureGame(); return; }   // 還在載入：載好後下一包快照就會進場
       if (!net.render) guestEnter(c);
       net.phase = pr.ph;
       var s = pr.s;
@@ -728,6 +736,7 @@
 
   function hostStart() {
     var c = ctrlOf();
+    if (!c) ensureGame();
     if (!c || !net.opp) return;
     if (!net.savedChars) net.savedChars = [c.physics.player1.character, c.physics.player2.character, c.physics.player1.isComputer, c.physics.player2.isComputer];
     c.physics.player1.character = net.myCh;

@@ -1,0 +1,2 @@
+# Only allow the game's topic prefix (from selfroom.js PREFIX = 'pvu9x7')
+topic readwrite pvu9x7/#

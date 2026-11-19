@@ -105,6 +105,10 @@
   function powerHitEdge(player, s, key) {
     return edge(s, key, player.isCollisionWithBallHappened && player.state === 2);
   }
+  // 觸控的技能鍵：dashRequest 是 ±2（鍵盤連點兩下產生的是 ±1，那個容易誤觸，所以不算）
+  function skillKey(input) {
+    return input.dashRequest === 2 ? 1 : input.dashRequest === -2 ? -1 : 0;
+  }
   function touchEdge(player, s, key) {
     return edge(s, key, player.isCollisionWithBallHappened);
   }
@@ -371,7 +375,7 @@
         s.tapDir = dirNow; s.tapAt = s.fc; s.tapHeld = 0;
       } else if (dirNow !== 0 && dirNow === s.tapDir) s.tapHeld++;
       s.prevDir = dirNow;
-      var req = (player.isComputer ? 0 : tap) || s.zipRequest || 0;
+      var req = (player.isComputer ? 0 : tap || skillKey(input)) || s.zipRequest || 0;
       s.zipRequest = 0;
       if (req && !s.qaCooldown && player.state < 3) {
         s.zipFrames = TUNING.qaFrames;
@@ -703,7 +707,7 @@
         s.tapDir = dirNow; s.tapAt = s.fc; s.tapHeld = 0;
       } else if (dirNow !== 0 && dirNow === s.tapDir) s.tapHeld++;
       s.prevDir = dirNow;
-      var req = (player.isComputer ? 0 : tap) || s.zipRequest || 0;
+      var req = (player.isComputer ? 0 : tap || skillKey(input)) || s.zipRequest || 0;
       s.zipRequest = 0;
       if (req && !(s.tpCD > 0) && player.state < 3) {
         var x0 = player.x, land = ball.expectedLandingPointX;

@@ -444,7 +444,29 @@
 }
 .pad-jump { left: var(--pad-margin); bottom: calc(var(--pad-margin) * 0.5); background: rgba(40, 140, 255, 0.55); border: 3px solid rgba(130, 200, 255, 0.8); }
 .pad-hit  { right: calc(var(--pad-margin) * 0.5); top: var(--pad-margin); background: rgba(230, 70, 40, 0.6); border: 3px solid rgba(255, 170, 120, 0.85); }
+/* 技能鍵：只有需要主動施放技能的角色才出現，放在「跳」上方的空位（touch-controls.js） */
+.pad-skill {
+  position: absolute;
+  display: none;
+  left: calc(var(--pad-margin) * 0.4);
+  top: calc(var(--pad-margin) * 0.2);
+  width: calc(var(--pad-btn) * 0.66);
+  height: calc(var(--pad-btn) * 0.66);
+  border-radius: 50%;
+  font-size: calc(var(--pad-btn) * 0.26);
+  font-weight: bold;
+  color: white;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.9);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  background: rgba(150, 70, 220, 0.6);
+  border: 3px solid rgba(210, 170, 255, 0.85);
+  pointer-events: auto;
+  touch-action: none;
+}
+.pad-skill.show { display: flex; }
+.pad-skill.cd { opacity: 0.35; }
 /* 2P 在左邊：鏡像 */
+#p2-pad .pad-skill { left: auto; right: calc(var(--pad-margin) * 0.4); }
 #p2-pad .pad-jump { left: auto; right: var(--pad-margin); }
 #p2-pad .pad-hit  { right: auto; left: calc(var(--pad-margin) * 0.5); }
 

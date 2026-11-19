@@ -751,6 +751,10 @@
     c.view.menu.visible = false;
     c.frameCounter = 0;
     c.noInputFrameCounter = 0;
+    // 開新的一局不會經過標題畫面，所以上一局留下的東西要自己清：
+    // 畫面關掉再開會把訊息（Game Set）全部收起來；背景音樂先停，不然 startOfNewGame 再播一次就疊兩層
+    c.view.game.visible = false;
+    try { c.audio.sounds.bgm.stop(); } catch (e) {}
     c.state = c.startOfNewGame;
     var g = parseIn(net.oppIn);
     net.usedPc = g.pc; net.usedDc = g.dc;
@@ -781,7 +785,7 @@
   function parseIn(a) {
     a = Array.isArray(a) ? a : [];
     var x = num(a[0]), y = num(a[1]);
-    return { x: x > 0 ? 1 : x < 0 ? -1 : 0, y: y > 0 ? 1 : y < 0 ? -1 : 0, pc: num(a[2]), dc: num(a[3]), dd: num(a[4]) > 0 ? 1 : num(a[4]) < 0 ? -1 : 0, seq: num(a[5]) };
+    return { x: x > 0 ? 1 : x < 0 ? -1 : 0, y: y > 0 ? 1 : y < 0 ? -1 : 0, pc: num(a[2]), dc: num(a[3]), dd: Math.max(-2, Math.min(2, Math.round(num(a[4])))), seq: num(a[5]) };   // ±1 連點兩下的衝刺，±2 觸控技能鍵
   }
 
   function hostInject(c) {
@@ -996,7 +1000,7 @@
 
     // 畫面狀態
     if (s.st === 'startOfNewGame' && net.gState !== 'startOfNewGame') {
-      try { c.audio.sounds.bgm.play(); } catch (e) {}
+      try { c.audio.sounds.bgm.stop(); c.audio.sounds.bgm.play(); } catch (e) {}   // 先停再播：再來一局、或進場前本機在跑示範賽時才不會疊兩層
       var an0 = A(); if (an0) an0.set(null);
     }
     net.gState = s.st;

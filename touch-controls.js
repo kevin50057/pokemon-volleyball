@@ -42,6 +42,70 @@
     document.addEventListener(ev, function (e) { e.preventDefault(); }, {passive:false});
   });
 
+  // ========== 觸控輔助：修正遊戲每一幀讀到的輸入 ==========
+  var KEYSETS = [P1_KEYS, P2_KEYS];
+  var joyX = [0, 0];            // 搖桿目前的左右方向（技能鍵用它決定往哪邊）
+  var skillReq = [0, 0];        // 技能鍵按下後，下一幀要送出的衝刺／瞬移請求
+  var aimLock = [false, false];
+  // 需要主動施放的技能才有技能鍵。dash：送出衝刺請求（水伊布用遊戲本體的 ±1，其他用 ±2，見 abilities.js 的 skillKey）；
+  // hold：按住等於按住那個方向鍵
+  var SKILLS = {
+    vaporeon:   { label: '衝', dash: 1 },
+    jolteon:    { label: '閃', dash: 2 },
+    mew:        { label: '瞬', dash: 2 },
+    jigglypuff: { label: '降', hold: 'down' }
+  };
+
+  function netState() { return window.PV_Net && window.PV_Net.state; }
+  // 這組按鍵現在控制的是哪一隻：連線對戰時房主一定是左邊、客人一定是右邊
+  function myPlayer(c, i) {
+    var n = netState();
+    if (n && n.render) return c.physics.player2;
+    if (n && n.role === 'host' && (n.phase === 'play' || n.phase === 'end')) return c.physics.player1;
+    return i === 0 ? c.physics.player1 : c.physics.player2;
+  }
+  // 球在接下來 3 幀內會不會碰到這隻角色（碰撞範圍是上下左右各 32，多留一點）
+  function ballSoon(c, me) {
+    var b = c.physics.ball, bx = b.x, by = b.y, bvy = b.yVelocity, py = me.y, pvy = me.yVelocity;
+    for (var k = 1; k <= 3; k++) {
+      bx += b.xVelocity; by += bvy; bvy += 1;
+      py = Math.min(244, py + pvy); pvy += 1;
+      if (Math.abs(bx - me.x) <= 40 && Math.abs(by - py) <= 40) return true;
+    }
+    return false;
+  }
+  // 沒推搖桿時技能往哪邊：往球會落下的地方（客人端沒有落點資料，用球現在的位置）
+  function towardBall(c, me) {
+    var b = c.physics.ball, n = netState(), land = n && n.render ? NaN : b.expectedLandingPointX;
+    var mine = me.isPlayer2 ? land > 216 : land < 216;
+    var d = (mine ? land : b.x) - me.x;
+    return d > 4 ? 1 : d < -4 ? -1 : (me.isPlayer2 ? -1 : 1);
+  }
+  function assist(c, kb, i) {
+    var keys = KEYSETS[i], me = myPlayer(c, i), n = netState();
+    var hit = !!pressed[keys.action], up = !!pressed[keys.up];
+    var playing = c.state === c.round || !!(n && n.render);
+    // 按住「殺」不放：球快碰到的那一刻自動出手。
+    // 殺球姿勢只維持 0.4 秒，手指又不像鍵盤能精準點在那一瞬間，太早按就會落空
+    if (playing && hit && me.state === 1 && kb.powerHit !== 1 && !me.isCollisionWithBallHappened && ballSoon(c, me)) kb.powerHit = 1;
+    // 「跳」和「殺」同時壓著（拇指橫跨兩顆、或從跳滑到殺）：跳其實是「上」鍵，會讓殺球變成往上挑的高球。
+    // 人在空中又按著殺時，不把它當成往上瞄準；要往下砸一樣把搖桿往下推
+    if (hit && up && (me.state === 1 || me.state === 2)) aimLock[i] = true;
+    if (!up) aimLock[i] = false;
+    if (aimLock[i]) kb.yDirection = kb.downKey && kb.downKey.isDown ? 1 : 0;
+    if (skillReq[i]) { kb.dashRequest = skillReq[i]; skillReq[i] = 0; }
+  }
+  // 遊戲載入後，接在它讀按鍵的函式後面
+  var hookTimer = setInterval(function () {
+    var c = window._pv && window._pv.ctrl;
+    if (!c || !c.keyboardArray) return;
+    clearInterval(hookTimer);
+    c.keyboardArray.forEach(function (kb, i) {
+      var orig = kb.getInput;
+      kb.getInput = function () { orig.call(kb); assist(c, kb, i); };
+    });
+  }, 200);
+
   // ========== JOYSTICK ==========
   function createJoystick(keys, side) {
     var zone = document.createElement('div');
@@ -74,6 +138,7 @@
         if (!newDirs[d] && curDirs[d]) releaseKey(keys[d]);
       }
       curDirs = newDirs;
+      joyX[side === 'p1' ? 0 : 1] = newDirs.left ? -1 : newDirs.right ? 1 : 0;
     }
 
     function moveKnob(dx, dy) {
@@ -87,6 +152,7 @@
       knob.style.transform = 'translate(0,0)';
       for (var d in curDirs) { if (curDirs[d]) releaseKey(keys[d]); }
       curDirs = { left:false, right:false, up:false, down:false };
+      joyX[side === 'p1' ? 0 : 1] = 0;
     }
 
     zone.addEventListener('touchstart', function(e) {
@@ -193,6 +259,30 @@
     pad.addEventListener('touchend', onEnd, {passive:false});
     pad.addEventListener('touchcancel', function (e) { noteCancel(); onEnd(e); }, {passive:false});
     pad.addEventListener('contextmenu', function(e) { e.preventDefault(); });
+
+    // 技能鍵：只有目前角色有主動技能時才顯示（見下面的更新迴圈）。
+    // 自己處理觸控、不往上傳，不然按鈕區會把它當成最近的「跳」
+    var skill = document.createElement('div');
+    skill.className = 'touch-btn pad-skill';
+    pad.appendChild(skill);
+    var idx = side === 'p1' ? 0 : 1, held = null;
+    skill.addEventListener('touchstart', function (e) {
+      e.preventDefault(); e.stopPropagation();
+      var c = window._pv && window._pv.ctrl, me = c && myPlayer(c, idx), sk = me && SKILLS[me.character];
+      if (!sk) return;
+      skill.classList.add('active');
+      if (sk.hold) { held = keys[sk.hold]; pressKey(held); }
+      else skillReq[idx] = (joyX[idx] || towardBall(c, me)) * sk.dash;
+    }, {passive:false});
+    function skillEnd(e) {
+      e.preventDefault(); e.stopPropagation();
+      skill.classList.remove('active');
+      if (held) { releaseKey(held); held = null; }
+    }
+    skill.addEventListener('touchmove', function (e) { e.preventDefault(); e.stopPropagation(); }, {passive:false});
+    skill.addEventListener('touchend', skillEnd, {passive:false});
+    skill.addEventListener('touchcancel', skillEnd, {passive:false});
+    pad.skillBtn = skill;
     return pad;
   }
 
@@ -208,6 +298,21 @@
   document.body.appendChild(p1Action);
   document.body.appendChild(p2Joystick);
   document.body.appendChild(p2Action);
+
+  // 技能鍵跟著角色出現／消失（百變怪會中途換角色），冷卻中變淡
+  setInterval(function () {
+    var c = window._pv && window._pv.ctrl;
+    if (!c || !c.physics) return;
+    var st = window._pvAbilities && window._pvAbilities.state && window._pvAbilities.state();
+    [p1Action, p2Action].forEach(function (pad, i) {
+      var me = myPlayer(c, i), sk = SKILLS[me.character], b = pad.skillBtn;
+      b.classList.toggle('show', !!sk);
+      if (!sk) return;
+      if (b.textContent !== sk.label) b.textContent = sk.label;
+      var s = (st && st[me.isPlayer2 ? 'p2' : 'p1']) || {};
+      b.classList.toggle('cd', s.qaCooldown > 0 || s.tpCD > 0 || me.dashCooldown > 0 || !!me.isDashing);
+    });
+  }, 150);
 
   // 2P toggle
   var toggle2P = document.createElement('div');

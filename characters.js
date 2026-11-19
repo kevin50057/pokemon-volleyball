@@ -30,7 +30,7 @@
     { id: 'ditto',      name: '百變怪',   type: '普', ability: 'transform',
       skill: '變身', desc: '每次有人得分，就隨機變成另一隻角色。' },
     { id: 'mrmime',     name: '魔牆人偶', type: '超', ability: 'barrier',
-      skill: '屏障', desc: '殺球後網子上方出現約 1.5 秒的隱形牆，擋下對面打過來的球。' },
+      skill: '屏障', desc: '殺球後網子上方出現約 1.5 秒的隱形牆，擋下一球就碎：一般球會軟軟彈回對面，對手的殺球會打穿但變慢。之後冷卻 4 秒。' },
     { id: 'dugtrio',    name: '三地鼠',   type: '地', ability: 'dig',
       skill: '沙丘陷阱', desc: '移動快。起跳時留下沙丘，球落在沙丘上會亂彈不算分。' },
     { id: 'farfetchd',  name: '大蔥鴨',   type: '普', ability: 'leekBoomerang',
@@ -44,7 +44,7 @@
     { id: 'dragonite',  name: '快龍',     type: '龍', ability: 'outrage',
       skill: '逆鱗', desc: '殺球後暴走 3 秒、移動變快；暴走中每次殺球疊一層，最多 3 層，一層比一層砸得重。暴走結束會混亂 1 秒（左右顛倒）。' },
     { id: 'mew',        name: '夢幻',     type: '超', ability: 'psychicShield',
-      skill: '念力護盾', desc: '碰球有 30% 機率替球套上護盾，落地前會自動彈起一次。' }
+      skill: '念力護盾＋念力彈', desc: '神獸。身邊有粉紅光環時，快落地的球一定會被念力托起（每 15 秒一次）；趁球還帶著光環殺球就是念力彈，又快又準。' }
   ];
 
   // 屬性 → 擊球光的顏色（殺球閃光、球的殘影、角色選擇的屬性標籤都用這個）

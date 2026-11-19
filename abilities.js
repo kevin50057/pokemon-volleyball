@@ -41,7 +41,7 @@
     // 果然翁
     wobbuffetSpike: 1.0, counterPower: 2, wobbuffetAISpike: 0, counterLaunch: 18, counterMaxVx: 28,
     // 魔牆人偶
-    barrierFrames: 35,
+    barrierFrames: 35, barrierCooldown: 100, barrierSoftVx: 5, barrierPierce: 0.55,
     // 胖丁
     jigglyJump: 0, jigglyFloat: 0.4,
     // 快龍
@@ -62,7 +62,7 @@
     // 紅色暴鯉龍：每次進化有幾 % 是紅色的、撐幾幀（150 = 6 秒）、球速上限、威嚇（對手定身幾幀）
     redGyaradosChance: 0.1, redGyaradosFrames: 150, redGyaradosVx: 30, redGyaradosStun: 10,
     // 夢幻
-    mewAuraChance: 0.3,
+    mewShieldCD: 375, mewLift: 15, mewChargeFrames: 45, mewBlastVx: 28,
     // 電腦防卡死：球在自己場上超過幾幀就強制起跳殺球
     antiStall: 100
   };
@@ -547,16 +547,26 @@
 
     // 魔牆人偶：網上方彈珠牆
     barrier: function (player, opp, ball, input, s) {
-      if (powerHitEdge(player, s, 'hit')) s.barrierTimer = TUNING.barrierFrames;
+      // 屏障不再是「原速反彈」：擋一球就碎；擋下的球只是軟軟掉回對面；對手的殺球會打穿，只被減速。碎掉或消失後要冷卻
+      if (s.barrierCD > 0) s.barrierCD--;
+      if (powerHitEdge(player, s, 'hit') && !(s.barrierCD > 0) && !(s.barrierTimer > 0)) s.barrierTimer = TUNING.barrierFrames;
       if (s.barrierTimer > 0) {
         s.barrierTimer--;
-        // 只擋「往自己這邊飛」的球，彈回對面；自己打出去的球直接通過
+        if (s.barrierTimer === 0) s.barrierCD = TUNING.barrierCooldown;
+        // 只擋「往自己這邊飛」的球；自己打出去的球直接通過
         var incoming = player.isPlayer2 ? ball.xVelocity > 0 : ball.xVelocity < 0;
         if (incoming && Math.abs(ball.x - NET_X) < 35 && ball.y > 30 && ball.y < 176) {
-          ball.xVelocity = clampV(-ball.xVelocity + (Math.random() - 0.5) * 5);
-          ball.yVelocity = clampV(ball.yVelocity + (Math.random() - 0.5) * 10);
-          ball.x += ball.xVelocity > 0 ? 5 : -5;
-          pushBurst(ball.x, ball.y, '#FF69B4', 25);
+          var dir = player.isPlayer2 ? -1 : 1;   // 往對手那邊的方向
+          if (ball.isPowerHit) {
+            ball.xVelocity = clampV(ball.xVelocity * TUNING.barrierPierce);   // 殺球：打穿牆，但變慢
+            ball.isPowerHit = false;
+          } else {
+            ball.xVelocity = dir * TUNING.barrierSoftVx;                      // 一般球：軟軟彈回去
+            ball.yVelocity = Math.min(ball.yVelocity, -6);
+            ball.x = NET_X + dir * 40;
+          }
+          pushBurst(ball.x, ball.y, '#FF69B4', 30);
+          s.barrierTimer = 0; s.barrierCD = TUNING.barrierCooldown;           // 擋一次就碎
         }
       }
     },
@@ -674,20 +684,30 @@
 
     // 夢幻：碰球機率替球加護盾
     psychicShield: function (player, opp, ball, input, s) {
+      // 夢幻（神獸）：念力護盾不靠運氣——冷卻好就一定救起快落地的球（身邊有粉紅光環＝準備好）。
+      // 救起來的球會被念力托在空中一小段時間；這時殺球就是「念力彈」：又快又準，一定落在對面場內。
       moveBonus(player, input, 1);
-      if (touchEdge(player, s, 'touch') && Math.random() < TUNING.mewAuraChance) {
-        s.auraTimer = 50;
+      if (s.mewCD > 0) s.mewCD--;
+      var mySide = player.isPlayer2 ? ball.x >= NET_X : ball.x < NET_X;
+      if (!(s.mewCD > 0) && mySide && ball.yVelocity > 0 && ball.y + ball.yVelocity + 1 >= 250) {   // 下一幀就要落地：在落地前托住
+        ball.yVelocity = -TUNING.mewLift;
+        ball.xVelocity = clampV(ball.xVelocity * 0.3);
+        ball.y = Math.min(ball.y, 240);
+        ball.isPowerHit = false;
+        s.mewCD = TUNING.mewShieldCD;
+        s.auraTimer = TUNING.mewChargeFrames;
+        pushBurst(ball.x, ball.y, '#FFB6C1', 55);
       }
       if (s.auraTimer > 0) {
         s.auraTimer--;
-        var mySide = player.isPlayer2 ? ball.x >= NET_X : ball.x < NET_X;
-        if (mySide && ball.y >= 250 && ball.yVelocity > 0) {
-          ball.yVelocity = -12;
-          ball.y = 249;
+        if (powerHitEdge(player, s, 'hit')) {
+          aimAtCourt(ball, player.isPlayer2, TUNING.mewBlastVx);
+          makePowerHit(ball, 35);
           s.auraTimer = 0;
-          pushBurst(ball.x, ball.y, '#FFB6C1', 45);
+          pushBurst(ball.x, ball.y, '#FF4FB8', 70);
+          tier(player, 3, ball.x, ball.y);
         }
-      }
+      } else powerHitEdge(player, s, 'hit');
     },
 
     // 快龍：殺球後暴走
@@ -892,6 +912,7 @@
     }
     if (s.ghostTimer > 0) ring(g, x, player.y, 34, '#7C4DFF', 0.6);
     if (s.qaWindow > 0) zap(g, x, player.y);
+    if (s.char === 'mew' && !s.mewCD) ring(g, x, player.y, 28 + Math.sin(tick / 3) * 2, '#FF80AB', 0.7);   // 夢幻：護盾準備好了
     if (s.char === 'mewtwo' && !s.psyCooldown) ring(g, x, player.y, 30 + Math.sin(tick / 3) * 2, '#B048FF', 0.7);   // 超夢：念力球準備好了
     if (s.fastFalling && player.y < GROUND_Y) {          // 胖丁快速落地：頭上的速度線
       g.strokeStyle = '#FFFFFF'; g.lineWidth = 2; g.globalAlpha = 0.85;

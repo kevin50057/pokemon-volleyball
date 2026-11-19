@@ -258,7 +258,7 @@
     ui.act = q('.act'); ui.st = q('.st'); ui.dbg = q('.dbg'); ui.codeIn = q('.code-in');
     q('.x').onclick = closePanel;
     ui.root.addEventListener('click', function (e) { if (e.target === ui.root) closePanel(); });
-    q('.chg').onclick = function () { if (window.PV_CharSelect) window.PV_CharSelect.open(1); };
+    q('.chg').onclick = function () { if (window.PV_CharSelect) window.PV_CharSelect.open(1, true); };
     q('.mk').onclick = function () { if (net.phase === 'off' && !conn.joining) start('host', newCode()); };
     ui.backRow = q('.back-row'); ui.back = q('.back');
     ui.back.onclick = function () { var l = lastRoom(); if (l) start(l.role, l.code); };

@@ -182,11 +182,11 @@
     refresh();
   }
 
-  function open(n) {
+  function open(n, fromNet) {
     if (!root) return;
     if (n) activeP = n;
     // 連線房間裡只選自己的角色：只留一格，選完直接關掉回到連線面板
-    netMode = !!(window.PV_Net && window.PV_Net.state.phase !== 'off') || (document.getElementById('pv-net') || {}).className === 'open';
+    netMode = fromNet === true;   // 只有從連線面板按「換角色」進來才是單格模式
     if (netMode) activeP = 1;
     root.classList.toggle('net', netMode);
     refresh();

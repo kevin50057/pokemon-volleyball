@@ -89,12 +89,40 @@
   }
 
   // ---------- 目前選擇（讀遊戲本體標記的 .selected） ----------
+  // 遊戲本體要按了第一個畫面的「開始」才會載入；在那之前角色按鈕沒有作用、也沒有 .selected。
+  // 所以載入前的選擇先記在這裡（並寫進遊戲本體用的同一個儲存位置），載入後再補按一次。
+  var KEYS = { 1: 'pv-offline-p1char', 2: 'pv-offline-p2char' };
+  var pending = {}, pendingTimer = 0;
+  function gameReady() { return !!(window._pv && window._pv.ctrl); }
+  function saved(n) {
+    var v = null;
+    try { v = localStorage.getItem(KEYS[n]); } catch (e) {}
+    return CH.byId[v] ? v : null;
+  }
   function current(n) {
-    for (var i = 0; i < CH.ids.length; i++) {
-      var b = document.getElementById('p' + n + '-' + CH.ids[i] + '-btn');
-      if (b && b.classList.contains('selected')) return CH.ids[i];
+    if (gameReady()) {
+      for (var i = 0; i < CH.ids.length; i++) {
+        var b = document.getElementById('p' + n + '-' + CH.ids[i] + '-btn');
+        if (b && b.classList.contains('selected')) return CH.ids[i];
+      }
     }
-    return n === 1 ? 'bird' : 'pikachu';
+    return pending[n] || saved(n) || (n === 1 ? 'bird' : 'pikachu');
+  }
+  function choose(n, id) {
+    var b = document.getElementById('p' + n + '-' + id + '-btn');
+    if (gameReady()) { if (b) b.click(); return; }
+    pending[n] = id;
+    try { localStorage.setItem(KEYS[n], id); } catch (e) {}
+    if (!pendingTimer) pendingTimer = setInterval(function () {
+      if (!gameReady()) return;
+      clearInterval(pendingTimer); pendingTimer = 0;
+      [1, 2].forEach(function (k) {
+        var pb = pending[k] && document.getElementById('p' + k + '-' + pending[k] + '-btn');
+        if (pb) pb.click();
+      });
+      pending = {};
+      if (isOpen()) refresh();
+    }, 200);
   }
 
   // ---------- 建立面板 ----------
@@ -175,8 +203,7 @@
   }
 
   function pick(id) {
-    var b = document.getElementById('p' + activeP + '-' + id + '-btn');
-    if (b) b.click();
+    choose(activeP, id);
     if (netMode) { refresh(); close(); var np = document.getElementById('pv-net'); if (np && np.classList.contains('open') && window.PV_Net) window.PV_Net.open(); return; }
     if (activeP === 1) activeP = 2;   // 選完 1P 自動換 2P
     refresh();
@@ -216,7 +243,7 @@
     }, true);
   }
 
-  window.PV_CharSelect = { open: open, close: close, toggle: function () { isOpen() ? close() : open(); } };
+  window.PV_CharSelect = { open: open, close: close, current: current, toggle: function () { isOpen() ? close() : open(); } };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 })();

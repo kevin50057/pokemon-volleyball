@@ -65,6 +65,7 @@
   function validCh(c) { return typeof c === 'string' && VALID[c] === true ? c : 'pikachu'; }
   function selectedChar(n) {
     if (!CH) return 'pikachu';
+    if (window.PV_CharSelect && window.PV_CharSelect.current) return validCh(window.PV_CharSelect.current(n));   // 遊戲還沒載入時也讀得到剛選的角色
     for (var i = 0; i < CH.ids.length; i++) {
       var b = document.getElementById('p' + n + '-' + CH.ids[i] + '-btn');
       if (b && b.classList.contains('selected')) return CH.ids[i];
@@ -289,7 +290,7 @@
     if (left) {
       var wrap = el('div', { class: 'relative-container' });
       var b = el('button', { type: 'button', id: 'pv-net-btn', class: 'btn' }, T.btn);
-      b.onclick = function (e) { e.stopPropagation(); openPanel(); };
+      b.onclick = function (e) { e.stopPropagation(); ensureGame(); openPanel(); };   // 趁玩家還在選角色、輸入代碼時先把遊戲載好
       wrap.appendChild(b);
       left.insertBefore(wrap, left.querySelector('.color-scheme-toggle-switch-container'));
     }

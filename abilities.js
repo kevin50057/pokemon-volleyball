@@ -62,7 +62,7 @@
     // 紅色暴鯉龍：每次進化有幾 % 是紅色的、撐幾幀（150 = 6 秒）、球速上限、威嚇（對手定身幾幀）
     redGyaradosChance: 0.1, redGyaradosFrames: 150, redGyaradosVx: 30, redGyaradosStun: 10,
     // 夢幻
-    mewShieldCD: 375, mewLift: 15, mewChargeFrames: 45, mewBlastVx: 28,
+    mewShieldCD: 500, mewTeleport: 110, mewTeleportCD: 150, mewTeleportAI: 0.005, mewLift: 15, mewChargeFrames: 45, mewBlastVx: 28,
     // 電腦防卡死：球在自己場上超過幾幀就強制起跳殺球
     antiStall: 100
   };
@@ -264,6 +264,12 @@
         var dx = ball.x - p.x;
         if (Math.abs(dx) > 35 && Math.abs(dx) < 90) s.zipRequest = dx > 0 ? 1 : -1;
       }
+    },
+    // 夢幻：落點離自己很遠就瞬間移動過去
+    mew: function (p, ball, opp, input, s) {
+      if (s.tpCD > 0) return;
+      var target = ball.expectedLandingPointX, mySide = p.isPlayer2 ? target > NET_X : target < NET_X;
+      if (p.state === 0 && mySide && Math.abs(target - p.x) > 90 && Math.random() < TUNING.mewTeleportAI) s.zipRequest = target > p.x ? 1 : -1;
     },
     // 卡比獸：跳不高，球還在高處時不要起跳，等球掉下來用肚子接
     snorlax: function (p, ball, opp, input) {
@@ -688,6 +694,32 @@
       // 救起來的球會被念力托在空中一小段時間；這時殺球就是「念力彈」：又快又準，一定落在對面場內。
       moveBonus(player, input, 1);
       if (s.mewCD > 0) s.mewCD--;
+      // 瞬間移動：連按兩下方向鍵。球會落在自己場上時直接出現在落點；否則往那個方向瞬移一段距離
+      if (s.tpCD > 0) s.tpCD--;
+      s.fc = (s.fc || 0) + 1;
+      var dirNow = input.xDirection, tap = 0;
+      if (dirNow !== 0 && dirNow !== (s.prevDir || 0)) {
+        if (s.tapDir === dirNow && s.fc - s.tapAt <= 6 && s.tapHeld <= 3) tap = dirNow;
+        s.tapDir = dirNow; s.tapAt = s.fc; s.tapHeld = 0;
+      } else if (dirNow !== 0 && dirNow === s.tapDir) s.tapHeld++;
+      s.prevDir = dirNow;
+      var req = (player.isComputer ? 0 : tap) || s.zipRequest || 0;
+      s.zipRequest = 0;
+      if (req && !(s.tpCD > 0) && player.state < 3) {
+        var x0 = player.x, land = ball.expectedLandingPointX;
+        var landMine = player.isPlayer2 ? land > NET_X : land < NET_X;
+        var toBall = landMine && (land - x0) * req > 0;       // 落點在自己場上、而且在按的那個方向
+        // 最遠只能移動 mewTeleport 這麼遠：落點在範圍內就剛好到落點，太遠就只能靠近
+        player.x = toBall ? x0 + req * Math.min(Math.abs(land - x0), TUNING.mewTeleport) : x0 + req * TUNING.mewTeleport;
+        clampPlayer(player);
+        s.tpCD = TUNING.mewTeleportCD;
+        pushBurst(x0, player.y, '#FF80AB', 40);
+        pushBurst(player.x, player.y, '#FFB6C1', 55);
+        if (window._pvFxEvent) {
+          window._pvFxEvent('zipStart', { player: player, dir: req });
+          window._pvFxEvent('zipEnd', { player: player, x0: x0, x1: player.x, y: player.y });
+        }
+      }
       var mySide = player.isPlayer2 ? ball.x >= NET_X : ball.x < NET_X;
       if (!(s.mewCD > 0) && mySide && ball.yVelocity > 0 && ball.y + ball.yVelocity + 1 >= 250) {   // 下一幀就要落地：在落地前托住
         ball.yVelocity = -TUNING.mewLift;

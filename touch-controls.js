@@ -61,6 +61,7 @@
   function myPlayer(c, i) {
     var n = netState();
     if (n && n.render) return c.physics.player2;
+    if (window.PV_Campaign && window.PV_Campaign.playing()) return c.physics.player1;   // 闖關：兩組按鍵都控制左邊的自己
     if (n && n.role === 'host' && (n.phase === 'play' || n.phase === 'end')) return c.physics.player1;
     return i === 0 ? c.physics.player1 : c.physics.player2;
   }

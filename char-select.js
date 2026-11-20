@@ -243,7 +243,7 @@
     }, true);
   }
 
-  window.PV_CharSelect = { open: open, close: close, current: current, toggle: function () { isOpen() ? close() : open(); } };
+  window.PV_CharSelect = { open: open, close: close, current: current, portrait: portrait, toggle: function () { isOpen() ? close() : open(); } };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 })();

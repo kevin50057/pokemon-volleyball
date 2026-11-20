@@ -331,6 +331,7 @@
     camp.boss = null; camp.tut = 0; camp.speedEvery = 0; camp.spd = 0;
     var rid = ruleFor(idx, camp.opp);
     camp.rule = rid ? newRule(rid) : null;
+    window._pvGoldBall = false;
     restoreTuning();
     resetSprites(c);
     setBgmSpeed(c, 1);
@@ -404,7 +405,7 @@
     if (!camp.waiting && save.run && save.run.live) {
       if (camp.ko && camp.ko.win) { save.run.live = 0; persist(); } else abandon();
     }
-    camp.playing = false; camp.waiting = false; camp.boss = null; camp.tut = 0; camp.speedEvery = 0; camp.wantStart = false; camp.ko = null; camp.rule = null;
+    camp.playing = false; camp.waiting = false; camp.boss = null; camp.tut = 0; camp.speedEvery = 0; camp.wantStart = false; camp.ko = null; camp.rule = null; window._pvGoldBall = false;
     restoreTuning();
     if (c) {
       setTint(c, 0xFFFFFF);
@@ -469,7 +470,6 @@
   // 物理和遊戲本體畫完之後：把被打倒的對手打飛（直接動畫面上的那張圖）
   function post(c) {
     var g = c.view.game, k = camp.ko, b = camp.boss;
-    try { g.ball.tint = camp.rule && camp.rule.golden && c.state === c.round && !c.roundEnded ? 0xFFD54F : 0xFFFFFF; } catch (e) {}
     if (b) {
       try { g.player2.tint = b.hit > 0 && b.hit % 4 < 2 ? 0xFF6060 : 0xFFFFFF; g.player1.tint = b.hurt > 0 && b.hurt % 4 < 2 ? 0xFF6060 : 0xFFFFFF; } catch (e) {}
     }
@@ -579,6 +579,7 @@
       r.rally++;
     }
     r.prev = c.state;
+    window._pvGoldBall = !!(r.golden && c.state === c.round && !c.roundEnded && !c.gameEnded);
     if (c.state !== c.round || c.roundEnded || c.gameEnded) return;
     r.rt++;
     if (ph.player1.isCollisionWithBallHappened || ph.player2.isCollisionWithBallHappened) r.touched = true;

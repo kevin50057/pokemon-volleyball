@@ -440,10 +440,12 @@
         else if (fx.kind === 'hurt' && t < 0.25) { py = 0.8 + 0.2 * (t / 0.25); px = 2 - py; }
       }
       var sign = sp.scale.x < 0 ? -1 : 1;
-      sp.scale.x = sign * px;
-      sp.scale.y = py;
+      // 閃電鳥的圖比較大，整體再縮一點（倍數在 abilities.js 的 TUNING.birdScale）
+      var AB = window._pvAbilities, size = p.character === 'bird' && AB && AB.tuning.birdScale ? AB.tuning.birdScale : 1;
+      sp.scale.x = sign * px * size;
+      sp.scale.y = py * size;
       // 錨點在中間：壓扁時讓腳保持貼地。貼圖比 64px 大的角色（閃電鳥 96px＝1.5 倍）往上移，腳才會在同一條地平線
-      var k = sp.texture && sp.texture.height ? sp.texture.height / 64 : 1;
+      var k = (sp.texture && sp.texture.height ? sp.texture.height / 64 : 1) * size;
       sp.y = p.y + 30 - 30 * py * k;
       if (k > 1) sp.y = Math.max(sp.y, 32 * k - 6);   // 飛到最高時不要整顆頭跑出畫面
       sp.x = p.x + ((fx.kind === 'hurt' && t < 0.15) ? Math.round(rand(-2, 2)) : 0);

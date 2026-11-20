@@ -58,6 +58,8 @@
     headacheMaxVx: 30, headacheNeed: 3, headacheStun: 7, psyTrip: 0.1,
     // 閃電鳥：同一跳拍翅幾次後殺球變成雷擊俯衝
     birdChargeFlaps: 3, birdMaxVx: 26,
+    // 閃電鳥的圖是 96px（其他角色 64px），場上縮成這個倍數，腳底位置不變（juice.js 套用）
+    birdScale: 0.82,
     // 胖丁：空中按下的快速落地加速、唱歌顛倒幾幀（100 幀 = 4 秒）
     jigglyFastFall: 3, singFrames: 100,
     // 鯉魚王
@@ -1236,12 +1238,22 @@
     if (b > 200 && r < 60 && g < 60) return [200, 120, 255];     // 原殘影的藍
     return null;
   }
+  // 紅白寶貝球 → 整顆金色的黃金球（闖關模式喵喵關）
+  function toGold(r, g, b) {
+    if (r > 200 && g < 60 && b < 60) return [255, 196, 30];      // 紅
+    if (r > 100 && r < 160 && g < 40) return [176, 112, 0];      // 暗紅
+    if (r > 230 && g > 230 && b > 230) return [255, 238, 150];   // 白
+    if (r > 140 && Math.abs(r - g) < 12 && Math.abs(g - b) < 12) return [236, 178, 40]; // 灰
+    if (b > 200 && r < 60 && g < 60) return [255, 214, 80];      // 原殘影的藍
+    return null;
+  }
 
   function initGfx(view) {
     var ballTex = view.ball.textures;
     gfx = {
       origBall: ballTex.slice(),
       purpleBall: ballTex.map(function (t) { return recolor(t, toPurple) || t; }),
+      goldBall: ballTex.map(function (t) { return recolor(t, toGold) || t; }),
       origPunch: view.punch.texture,
       punchByType: {},
       punchPurple: null,
@@ -1249,7 +1261,8 @@
       whiteTrail: recolor(view.ballTrail.texture, toWhite),
       origHyper: view.ballHyper.texture,
       purpleHyper: recolor(view.ballHyper.texture, toPurple),
-      purple: false,
+      goldHyper: recolor(view.ballHyper.texture, toGold),
+      purple: false, look: 'orig',
       ghosts: []
     };
     // 每種屬性一張專屬形狀的殺球特效（punch-shapes.js）
@@ -1299,10 +1312,12 @@
     if (gfx.whiteTrail) { view.ballTrail.texture = gfx.whiteTrail; view.ballTrail.tint = tint; }
 
     // 寶貝球本身
-    if (purple !== gfx.purple) {
-      gfx.purple = purple;
-      view.ball.textures = purple ? gfx.purpleBall : gfx.origBall;
-      view.ballHyper.texture = purple && gfx.purpleHyper ? gfx.purpleHyper : gfx.origHyper;
+    // 黃金球：闖關模式設 window._pvGoldBall（念力球優先）
+    var look = purple ? 'purple' : window._pvGoldBall ? 'gold' : 'orig';
+    if (look !== gfx.look) {
+      gfx.look = look; gfx.purple = purple;
+      view.ball.textures = look === 'purple' ? gfx.purpleBall : look === 'gold' ? gfx.goldBall : gfx.origBall;
+      view.ballHyper.texture = (look === 'purple' && gfx.purpleHyper) || (look === 'gold' && gfx.goldHyper) || gfx.origHyper;
       trailHist = [];
     }
     view.ball.gotoAndStop(ball.rotation);

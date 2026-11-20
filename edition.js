@@ -12,7 +12,7 @@
     ko: { btn: '모험판', moved: '캠페인 모드는 모험판으로 옮겨졌습니다. 진행 상황은 그대로입니다.', go: '모험판 열기', ok: '확인', back: '', backLink: '' }
   }[LANG] || null;
   if (!T) return;
-  var ADV_URL = '../adventure/', CLASSIC_URL = '../zh/', NOTICE_KEY = 'pv-ed-notice-1';
+  var ADV_URL = 'https://kevin50057.github.io/pokemon-volleyball-adventure/', CLASSIC_URL = '../zh/', NOTICE_KEY = 'pv-ed-notice-1';
 
   var css = [
     '#pv-ed-btn{background:linear-gradient(#ffd75e,#f39c12)!important;color:#3a2400!important;font-weight:900!important;border-color:#fff3c4!important}',

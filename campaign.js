@@ -1667,7 +1667,7 @@
     cfg: CFG, state: camp, open: openFromMenu,
     playing: function () { return camp.playing && !camp.waiting; },
     save: function () { return save; },
-    owned: owned, medalTier: medalTier, tiers: TIER, rules: RULES,
+    owned: owned, howToGet: howToGet, medalTier: medalTier, tiers: TIER, rules: RULES,
     // 真人遊玩的紀錄：每一關「這一輪第一次挑戰就贏」的比例，和每一輪的敗場數
     stats: function () {
       var rows = Object.keys(save.stats).map(function (k) {

@@ -32,6 +32,8 @@
     '#pv-cs .card .ty{position:absolute;top:4px;left:5px;font-size:10px;font-weight:800;padding:0 5px;border-radius:6px;color:#111}',
     '#pv-cs .card .mk{position:absolute;top:3px;right:4px;font-size:10px;font-weight:800;padding:0 4px;border-radius:5px}',
     '#pv-cs .card .cm{position:absolute;left:5px;bottom:2px;font-size:14px;text-shadow:0 1px 0 #000}',
+    '#pv-cs .card.lk canvas{filter:brightness(0) invert(.32);opacity:.9}#pv-cs .card.lk .ty{display:none}',
+    '#pv-cs .card.lk::after{content:"🔒";position:absolute;right:4px;bottom:3px;font-size:12px}',
     '#pv-cs .card .mk.p1{background:#42A5F5}#pv-cs .card .mk.p2{background:#FF7043;top:18px}',
     '#pv-cs .card.sel-p1{border-color:#42A5F5}#pv-cs .card.sel-p2{border-color:#FF7043}#pv-cs .card.sel-p1.sel-p2{border-color:#ce93d8}',
     '#pv-cs .desc{margin-top:10px;min-height:42px;padding:8px 12px;border-radius:10px;background:#141729;font-size:13px;line-height:1.55}',
@@ -110,7 +112,17 @@
     try { v = localStorage.getItem(KEYS[n]); } catch (e) {}
     return CH.byId[v] ? v : null;
   }
-  function current(n) {
+  // ---------- 遠征版：全遊戲鎖角色（經典版全開） ----------
+  // 解鎖狀態以闖關模式的存檔為準（campaign.js 的 PV_Campaign.owned）
+  var ADV = window.PV_EDITION === 'adventure';
+  var STARTERS = ['pikachu', 'vaporeon', 'flareon', 'jolteon'];
+  function unlocked(id) {
+    if (!ADV) return true;
+    var PC = window.PV_Campaign;
+    return PC && PC.owned ? PC.owned(id) : STARTERS.indexOf(id) >= 0;
+  }
+  function fallback(n) { return n === 1 ? 'pikachu' : 'vaporeon'; }
+  function rawCurrent(n) {
     if (gameReady()) {
       for (var i = 0; i < CH.ids.length; i++) {
         var b = document.getElementById('p' + n + '-' + CH.ids[i] + '-btn');
@@ -118,6 +130,15 @@
       }
     }
     return pending[n] || saved(n) || (n === 1 ? 'bird' : 'pikachu');
+  }
+  function current(n) { var id = rawCurrent(n); return unlocked(id) ? id : fallback(n); }
+  // 選到鎖住的角色（例如經典版選的、或存檔是舊的）就換回可用的；闖關和連線進行中不動
+  function enforce() {
+    if (!ADV || !gameReady()) return;
+    var PC = window.PV_Campaign, NS = window.PV_Net && window.PV_Net.state;
+    if (PC && PC.state && PC.state.playing) return;
+    if (NS && (NS.phase !== 'off' || NS.render)) return;
+    [1, 2].forEach(function (n) { if (!unlocked(rawCurrent(n))) choose(n, fallback(n)); });
   }
   function choose(n, id) {
     var b = document.getElementById('p' + n + '-' + id + '-btn');
@@ -175,7 +196,7 @@
       card.insertAdjacentHTML('beforeend',
         '<div class="nm">' + c.name + '</div><div class="sk">' + c.skill + '</div>' +
         '<span class="ty" style="background:' + c.color + '">' + c.type + '</span>');
-      card.addEventListener('click', function () { pick(c.id); });
+      card.addEventListener('click', function () { if (unlocked(c.id)) pick(c.id); else showLocked(c.id); });
       card.addEventListener('mouseenter', function () { showDesc(c.id); });
       card.addEventListener('mouseleave', function () { showDesc(current(activeP)); });
       grid.appendChild(card);
@@ -186,9 +207,14 @@
     document.body.appendChild(root);
   }
 
+  function showLocked(id) {
+    var PC = window.PV_Campaign, how = PC && PC.howToGet ? PC.howToGet(id) : '';
+    descEl.innerHTML = '<b>？？？・尚未收服</b>' + (how ? '取得方式：' + how + '。' : '要在闖關模式中收服。');
+  }
   function showDesc(id) {
     var c = CH.byId[id];
     if (!c) return;
+    if (!unlocked(id)) { showLocked(id); return; }
     descEl.innerHTML = '<b style="color:' + c.color + '">' + c.name + '・' + c.skill + '</b>' + c.desc;
   }
 
@@ -203,7 +229,10 @@
       sl.sk.textContent = c ? c.skill : '';
     });
     CH.ids.forEach(function (id) {
-      var card = cards[id];
+      var card = cards[id], lk = !unlocked(id);
+      card.classList.toggle('lk', lk);
+      card.querySelector('.nm').textContent = lk ? '？？？' : CH.byId[id].name;
+      card.querySelector('.sk').textContent = lk ? '尚未收服' : CH.byId[id].skill;
       card.classList.toggle('sel-p1', sel[1] === id);
       card.classList.toggle('sel-p2', sel[2] === id);
       card.querySelectorAll('.mk').forEach(function (m) { m.remove(); });
@@ -248,6 +277,7 @@
     if (menuBtn) {
       menuBtn.addEventListener('click', function (e) { e.stopImmediatePropagation(); e.preventDefault(); open(); }, true);
     }
+    if (ADV) setInterval(enforce, 800);
     window.addEventListener('keydown', function (e) {
       if (e.code === 'KeyC' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
         isOpen() ? close() : open();
@@ -258,7 +288,7 @@
     }, true);
   }
 
-  window.PV_CharSelect = { open: open, close: close, current: current, portrait: portrait, paintFrame: paintFrame, toggle: function () { isOpen() ? close() : open(); } };
+  window.PV_CharSelect = { open: open, close: close, current: current, unlocked: unlocked, portrait: portrait, paintFrame: paintFrame, toggle: function () { isOpen() ? close() : open(); } };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 })();

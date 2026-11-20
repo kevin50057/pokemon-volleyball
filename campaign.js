@@ -39,6 +39,14 @@
     startFrames: 45,                 // 闖關時每場開場的幀數（遊戲本體原本是 71；VS 畫面已經演過一次開場了）
     // 分出勝負那一球的演出（幀）：stop 停格、之後打飛對手；hold 到了就進結算；skipAfter 之後按殺球鍵可跳過
     ko: { stop: 8, winHold: 42, loseHold: 30, bossBoom: 34, bossHold: 84, skipAfter: 20, bossSkipAfter: 64 },
+    // 場地規則（跟著對手走；教學關和超夢不套用）
+    rules: {
+      react: 8,                                   // AI 看到預警後幾幀才開始照規則判斷（玩家也大約要這麼久）
+      rain: { warn: 25, life: 200, every: 125, maxPairs: 2, half: 22, bounce: -15, damp: 0.5 },
+      lowgrav: { period: 200, warnAt: 100, onAt: 125 },          // 每 8 秒：4 秒正常、1 秒預警、3 秒低重力
+      gold: { every: 4, first: 2, points: 2 },                    // 第 3、7、11… 球是黃金球
+      wind: { period: 175, warnAt: 75, onAt: 100, every: 10 }     // 每 7 秒：3 秒無風、1 秒預警、3 秒強風（每 10 幀推球 1）
+    },
     fullAcquire: 2,                  // 前幾次收服播完整版，之後播短版（超夢、百變怪、夢幻一律完整版）
     boss: {
       hp: 9, playerHp: 5, perPhase: 3,
@@ -61,7 +69,7 @@
   // ============================================================
   // 存檔：進行中的一輪、獎章、收服的夥伴
   // ============================================================
-  var save = { run: null, medals: {}, owned: {}, acq: 0, tutDone: 0 };
+  var save = { run: null, medals: {}, owned: {}, acq: 0, tutDone: 0, stats: {}, runs: [] };
   function validRun(r) {
     if (!r || typeof r !== 'object' || !CH.byId[r.char] || !Array.isArray(r.order) || r.order.length !== STAGES) return false;
     for (var i = 0; i < r.order.length; i++) if (!CH.byId[r.order[i]]) return false;
@@ -78,9 +86,15 @@
       });
       save.acq = Math.max(0, Math.floor(+o.acq) || 0);
       save.tutDone = o.tutDone ? 1 : 0;
+      if (o.stats && typeof o.stats === 'object') Object.keys(o.stats).forEach(function (k) {
+        var v = o.stats[k];
+        if (/^\d+:[a-z]+$/.test(k) && v && typeof v === 'object') save.stats[k] = { t: Math.max(0, Math.floor(+v.t) || 0), w: Math.max(0, Math.floor(+v.w) || 0) };
+      });
+      if (Array.isArray(o.runs)) save.runs = o.runs.slice(-30).filter(function (r) { return r && CH.byId[r.c]; }).map(function (r) { return { c: r.c, lost: Math.floor(+r.lost) || 0, f: Math.floor(+r.f) || 0, d: String(r.d || '').slice(0, 10) }; });
       if (validRun(o.run)) {
         save.run = { char: o.run.char, order: o.run.order.slice(), idx: Math.floor(o.run.idx), hearts: Math.floor(o.run.hearts),
-          bossPhase: Math.min(3, Math.max(1, Math.floor(+o.run.bossPhase) || 1)), frames: +o.run.frames || 0, lost: +o.run.lost || 0, live: o.run.live ? 1 : 0 };
+          bossPhase: Math.min(3, Math.max(1, Math.floor(+o.run.bossPhase) || 1)), frames: +o.run.frames || 0, lost: +o.run.lost || 0, live: o.run.live ? 1 : 0, att: {} };
+        if (o.run.att && typeof o.run.att === 'object') for (var ai = 0; ai < STAGES; ai++) if (o.run.att[ai] > 0) save.run.att[ai] = Math.floor(+o.run.att[ai]);
         save.owned[save.run.char] = 1;
         abandon();                                  // 上次打到一半就關掉或重新整理
       }
@@ -158,7 +172,7 @@
     persist();
   }
   function newRun(char) {
-    save.run = { char: char, order: buildOrder(char), idx: 0, hearts: CFG.hearts, bossPhase: 1, frames: 0, lost: 0 };
+    save.run = { char: char, order: buildOrder(char), idx: 0, hearts: CFG.hearts, bossPhase: 1, frames: 0, lost: 0, att: {} };
     persist();
   }
 
@@ -216,7 +230,7 @@
   function resetSprites(c) {
     try {
       var g = c.view.game;
-      g.player2.rotation = 0; g.player2.tint = 0xFFFFFF; g.player1.tint = 0xFFFFFF;
+      g.player2.rotation = 0; g.player2.tint = 0xFFFFFF; g.player1.tint = 0xFFFFFF; g.ball.tint = 0xFFFFFF;
       g.shadows.forPlayer2.visible = true;
     } catch (e) {}
   }
@@ -261,6 +275,9 @@
       else if (name === 'fanfare') { notes('square', [523, 523, 523, 659, 784, 659, 784, 1047], 0.13, 0.2, 0.3); notes('triangle', [262, 262, 330, 392, 523], 0.26, 0.4, 0.4); }
       else if (name === 'hit') { tone('square', 260, 90, 0, 0.14, 0.35); tone('sine', 120, 50, 0, 0.18, 0.8); }
       else if (name === 'hurt') tone('sawtooth', 180, 60, 0, 0.22, 0.4);
+      else if (name === 'splash') { tone('sine', 900, 300, 0, 0.12, 0.3); tone('triangle', 500, 1200, 0.03, 0.1, 0.2); }
+      else if (name === 'wind') { tone('sawtooth', 120, 260, 0, 0.5, 0.12); tone('sine', 300, 600, 0.1, 0.4, 0.15); }
+      else if (name === 'coin') notes('square', [988, 1319], 0.06, 0.12, 0.3);
       else if (name === 'phase') { tone('sawtooth', 80, 320, 0, 0.6, 0.4); tone('sine', 60, 30, 0.55, 0.5, 1); }
     } catch (e) {}
   }
@@ -287,8 +304,13 @@
     if (!camp.saved) camp.saved = { c1: p1.character, c2: p2.character, k1: p1.isComputer, k2: p2.isComputer, win: c.winningScore, practice: !!c.isPracticeMode, startFrames: c.frameTotal.startOfNewGame };
     abandon();                                      // 保險：上一場沒打完的話先結算
     idx = run.idx; z = zoneOf(idx);
-    run.live = 1; persist();
+    run.live = 1;
     camp.opp = run.order[idx];
+    // 這一輪第幾次挑戰這一關；第一次的話記進首勝率
+    run.att = run.att || {};
+    run.att[idx] = (run.att[idx] || 0) + 1;
+    if (run.att[idx] === 1 && !camp.proxy) { var sk = idx + ':' + camp.opp; save.stats[sk] = save.stats[sk] || { t: 0, w: 0 }; save.stats[sk].t++; }
+    persist();
     p1.character = run.char; p2.character = camp.opp;
     p1.isComputer = !!camp.proxy; p2.isComputer = true;
     if (c.isPracticeMode) c.isPracticeMode = false;
@@ -307,6 +329,8 @@
     camp.playing = true; camp.waiting = false; camp.ko = null; camp.prevState = null;
     camp.diff = CFG.diff[idx]; camp.ai1 = newAi(); camp.ai2 = newAi();
     camp.boss = null; camp.tut = 0; camp.speedEvery = 0; camp.spd = 0;
+    var rid = ruleFor(idx, camp.opp);
+    camp.rule = rid ? newRule(rid) : null;
     restoreTuning();
     resetSprites(c);
     setBgmSpeed(c, 1);
@@ -335,6 +359,7 @@
     var steps = [], after;
     if (win) {
       if (run.idx === 0) save.tutDone = 1;
+      if (run.att && run.att[run.idx] === 1 && !camp.proxy) { var sk2 = run.idx + ':' + opp; if (save.stats[sk2]) save.stats[sk2].w++; }
       var got = unlock(opp), full = save.acq < CFG.fullAcquire || opp === 'mewtwo' || opp === 'dragonite';
       if (got) save.acq++;
       if (run.idx >= STAGES - 1) {
@@ -345,6 +370,7 @@
         save.medals[run.char] = m;
         camp.lastRun = run;
         save.run = null;
+        if (!camp.proxy) { save.runs.push({ c: run.char, lost: run.lost, f: Math.round(run.frames), d: new Date().toISOString().slice(0, 10) }); if (save.runs.length > 30) save.runs.shift(); }
         var extra = checkSpecial();
         if (got) steps.push(function (next) { playAcquire(opp, true, next); });
         steps.push(function (next) { playClear(run, rec, next); });
@@ -378,7 +404,7 @@
     if (!camp.waiting && save.run && save.run.live) {
       if (camp.ko && camp.ko.win) { save.run.live = 0; persist(); } else abandon();
     }
-    camp.playing = false; camp.waiting = false; camp.boss = null; camp.tut = 0; camp.speedEvery = 0; camp.wantStart = false; camp.ko = null;
+    camp.playing = false; camp.waiting = false; camp.boss = null; camp.tut = 0; camp.speedEvery = 0; camp.wantStart = false; camp.ko = null; camp.rule = null;
     restoreTuning();
     if (c) {
       setTint(c, 0xFFFFFF);
@@ -429,6 +455,7 @@
         var bw = !!p1.isWinner;
         k = camp.ko = { t: 0, win: bw, boss: !!camp.boss, x: c.physics.ball.punchEffectX || (bw ? 330 : 100), px: p2.x, py: p2.y, isNew: !owned(camp.opp), idx: run.idx, tint0: camp.boss ? CFG.boss.tint[camp.boss.phase - 1] : 0 };
         sfx(bw ? 'ko' : 'lose');
+        if (bw) { run.live = 0; persist(); }
       }
       k.t++;
       if (k.win && k.t <= K.stop) { drawHud(c); return false; }      // 停格
@@ -442,6 +469,7 @@
   // 物理和遊戲本體畫完之後：把被打倒的對手打飛（直接動畫面上的那張圖）
   function post(c) {
     var g = c.view.game, k = camp.ko, b = camp.boss;
+    try { g.ball.tint = camp.rule && camp.rule.golden && c.state === c.round && !c.roundEnded ? 0xFFD54F : 0xFFFFFF; } catch (e) {}
     if (b) {
       try { g.player2.tint = b.hit > 0 && b.hit % 4 < 2 ? 0xFF6060 : 0xFFFFFF; g.player1.tint = b.hurt > 0 && b.hurt % 4 < 2 ? 0xFF6060 : 0xFFFFFF; } catch (e) {}
     }
@@ -517,9 +545,199 @@
     }
   }
 
+  // ============================================================
+  // 場地規則：跟著對手走，兩邊一視同仁，會改變球路的事件一定先預警
+  // ============================================================
+  var RULES = {
+    rain: { opp: 'psyduck', name: '雨天水窪', color: '#4FC3F7', short: '球落在水窪上會彈起來（兩邊都一樣）',
+      desc: '場上會出現成對的水窪，淡淡出現 1 秒後才有效。球落在水窪上會彈起來，兩邊都一樣。' },
+    lowgrav: { opp: 'jigglypuff', name: '搖籃曲', color: '#FF8AD8', short: '每 8 秒有 3 秒低重力，球會飄',
+      desc: '每 8 秒有 3 秒重力減半，球飛得慢、飄得高。開始前 1 秒會出現音符、畫面變粉紅。' },
+    gold: { opp: 'meowth', name: '黃金球', color: '#FFD54F', short: '每 4 球有一顆黃金球，拿下得 2 分',
+      desc: '第 3、7、11… 球是黃金球，發球前會寫「本球 2 分」。拿下它得 2 分，可以直接拿到過關分。' },
+    wind: { opp: 'farfetchd', name: '強風', color: '#B2FF59', short: '箭頭出現 1 秒後起風，把球往箭頭方向推',
+      desc: '每 7 秒颳一次 3 秒的風。上方箭頭先出現 1 秒，之後把飛行中的球往箭頭方向推（發球後第一次碰球前不會吹）。' }
+  };
+  var RULE_OF = {};
+  Object.keys(RULES).forEach(function (id) { RULE_OF[RULES[id].opp] = id; });
+  function ruleFor(idx, opp) { return zoneOf(idx).boss || idx === 0 ? null : RULE_OF[opp] || null; }
+  function newRule(id) { return { id: id, rt: 0, rally: 0, golden: false, touched: false, prev: null, puddles: [], spawn: 25, dir: 1, splash: [], pop: null }; }
+
+  function lowgravOn(t) { var L = CFG.rules.lowgrav, k = t % L.period; return k >= L.onAt; }
+  function lowgravWarn(t) { var L = CFG.rules.lowgrav, k = t % L.period; return k >= L.warnAt && k < L.onAt; }
+  function windOn(t) { var L = CFG.rules.wind, k = t % L.period; return k >= L.onAt; }
+  function windWarn(t) { var L = CFG.rules.wind, k = t % L.period; return k >= L.warnAt && k < L.onAt; }
+
+  // 每一個真的有跑物理的幀（在物理之前）
+  function rulePhysics(c) {
+    var r = camp.rule;
+    if (!r || camp.waiting) return;
+    var ph = c.physics, ball = ph.ball, R = CFG.rules;
+    if (c.state === c.round && r.prev !== c.round) {           // 新的一球
+      r.touched = false;
+      r.golden = r.id === 'gold' && r.rally % R.gold.every === R.gold.first;
+      r.rally++;
+    }
+    r.prev = c.state;
+    if (c.state !== c.round || c.roundEnded || c.gameEnded) return;
+    r.rt++;
+    if (ph.player1.isCollisionWithBallHappened || ph.player2.isCollisionWithBallHappened) r.touched = true;
+    var air = ball.y < 252;
+    if (r.id === 'rain') {
+      var Rn = R.rain;
+      if (--r.spawn <= 0 && r.puddles.length < Rn.maxPairs * 2) {
+        var x = 52 + Math.random() * 116;
+        r.puddles.push({ x: x, t: 0 }, { x: W - x, t: 0 });
+        r.spawn = Rn.every;
+      } else if (r.spawn <= 0) r.spawn = 25;
+      for (var i = r.puddles.length - 1; i >= 0; i--) if (++r.puddles[i].t > Rn.warn + Rn.life) r.puddles.splice(i, 1);
+      // 球下一幀就會落地：落點在水窪上就彈起來
+      if (ball.yVelocity > 0 && ball.y + ball.yVelocity > 252) {
+        var nx = ball.x + ball.xVelocity;
+        for (var j = 0; j < r.puddles.length; j++) {
+          var pd = r.puddles[j];
+          if (pd.t >= Rn.warn && Math.abs(nx - pd.x) < Rn.half) {
+            ball.yVelocity = Rn.bounce;
+            ball.xVelocity = Math.round(ball.xVelocity * Rn.damp);
+            r.splash.push({ x: pd.x, t: 0 });
+            r.puddles.splice(j, 1);
+            sfx('splash');
+            break;
+          }
+        }
+      }
+    } else if (r.id === 'lowgrav') {
+      if (lowgravOn(r.rt) && air && r.rt % 2 === 0) ball.yVelocity -= 1;
+    } else if (r.id === 'wind') {
+      var Lw = R.wind, k = r.rt % Lw.period;
+      if (k === Lw.warnAt) { r.dir = Math.random() < 0.5 ? -1 : 1; sfx('wind'); }
+      if (windOn(r.rt) && r.touched && air && r.rt % Lw.every === 0) ball.xVelocity = Math.max(-30, Math.min(30, ball.xVelocity + r.dir));
+    }
+  }
+
+  // AI 用的落點預測：跟遊戲本體同樣的球路計算，再加上「AI 已經看到預警」的規則效果
+  function predictLanding(ball, r) {
+    var R = CFG.rules, know = r.rt - R.react;
+    var x = ball.x, y = ball.y, vx = ball.xVelocity, vy = ball.yVelocity, t = r.rt, touched = r.touched;
+    function knownGrav(tt) {
+      if (r.id !== 'lowgrav' || !lowgravOn(tt)) return false;
+      var start = tt - tt % R.lowgrav.period + R.lowgrav.warnAt;     // 這一次的預警從哪一幀開始
+      return start <= know;
+    }
+    function knownWind(tt) {
+      if (r.id !== 'wind' || !windOn(tt) || !touched) return 0;
+      var start = tt - tt % R.wind.period + R.wind.warnAt;
+      return start <= know && start > r.rt - R.wind.period ? r.dir : 0;   // 只知道這一次的風向
+    }
+    // AI 是在這一幀的球已經動完之後才判斷，所以從下一幀開始算：先套規則（跟 rulePhysics 一樣在物理之前），再走一步物理
+    for (var k = 0; k < 160; k++) {
+      t++;
+      if (knownGrav(t) && t % 2 === 0 && y < 252) vy -= 1;
+      var d = knownWind(t); if (d && t % R.wind.every === 0 && y < 252) vx = Math.max(-30, Math.min(30, vx + d));
+      if (x + vx < 20 || x + vx > W) vx = -vx;
+      if (y + vy < 0) vy = 1;
+      if (Math.abs(x - NET_X) < 25 && y > 176) { if (y <= 192) { if (vy > 0) vy = -vy; } else vx = x < NET_X ? -Math.abs(vx) : Math.abs(vx); }
+      if (y + vy > 252) return x;
+      y += vy; x += vx; vy += 1;
+    }
+    return null;
+  }
+
+  // 黃金球：拿下這一球固定得 2 分（喵喵自己的「得 2 分」不會疊上去）
+  var innerScore = window._pvScore;
+  window._pvScore = function (ctrl, idx) {
+    var pts = innerScore ? innerScore(ctrl, idx) : 1, r = camp.rule;
+    if (camp.playing && r && r.golden) {
+      pts = CFG.rules.gold.points;
+      r.pop = { side: idx, t: 0 };
+      sfx('coin');
+    }
+    return pts;
+  };
+
+  function drawRule(c, g, r, t, lite) {
+    var R = CFG.rules, ball = c.physics.ball, live = c.state === c.round && !c.roundEnded && !c.gameEnded, def = RULES[r.id];
+    if (r.id === 'rain') {
+      g.strokeStyle = 'rgba(180,225,255,0.35)'; g.lineWidth = 1;
+      for (var i = 0, n = lite ? 14 : 40; i < n; i++) {
+        var rx = (i * 61 + t * 7) % (W + 40) - 20, ry = (i * 37 + t * 11) % (H + 20) - 10;
+        g.beginPath(); g.moveTo(rx, ry); g.lineTo(rx - 3, ry + 9); g.stroke();
+      }
+      r.puddles.forEach(function (pd) {
+        var on = pd.t >= R.rain.warn, end = R.rain.warn + R.rain.life - pd.t;
+        var a = on ? (end < 25 && end % 6 < 3 ? 0.35 : 0.8) : 0.12 + 0.3 * pd.t / R.rain.warn;
+        g.globalAlpha = a; g.fillStyle = '#29B6F6';
+        g.beginPath(); g.ellipse(pd.x, FLOOR_Y, R.rain.half, 5, 0, 0, Math.PI * 2); g.fill();
+        if (!on) { g.strokeStyle = '#B3E5FC'; g.lineWidth = 1.5; g.setLineDash([3, 3]); g.stroke(); g.setLineDash([]); }
+        else { g.fillStyle = '#E1F5FE'; g.beginPath(); g.ellipse(pd.x - 7, FLOOR_Y - 1, 7, 1.6, 0, 0, Math.PI * 2); g.fill(); }
+        g.globalAlpha = 1;
+      });
+      r.splash = r.splash.filter(function (sp) {
+        sp.t++;
+        g.globalAlpha = 1 - sp.t / 14; g.strokeStyle = '#B3E5FC'; g.lineWidth = 2;
+        g.beginPath(); g.ellipse(sp.x, FLOOR_Y, 10 + sp.t * 3, 3 + sp.t, 0, 0, Math.PI * 2); g.stroke();
+        for (var d = -1; d <= 1; d++) { g.beginPath(); g.arc(sp.x + d * (6 + sp.t), FLOOR_Y - 6 - sp.t * 2 + sp.t * sp.t * 0.15, 2, 0, Math.PI * 2); g.fillStyle = '#B3E5FC'; g.fill(); }
+        g.globalAlpha = 1;
+        return sp.t < 14;
+      });
+    } else if (r.id === 'lowgrav') {
+      var on = lowgravOn(r.rt) && live, warn = lowgravWarn(r.rt) && live;
+      if (on || warn) {
+        if (!lite) { g.globalAlpha = on ? 0.12 : 0.06 + 0.06 * Math.sin(t / 2); g.fillStyle = '#FF80C8'; g.fillRect(0, 0, W, H); g.globalAlpha = 1; }
+        for (var k = 0; k < (lite ? 4 : 9); k++) {
+          var nx = (k * 53 + 30) % W, ny = H - ((t * (on ? 1.2 : 0.6) + k * 41) % H);
+          label(g, k % 2 ? '♪' : '♫', nx, ny, 12, '#FFB3E6');
+        }
+        if (warn) label(g, '搖籃曲要來了！', NET_X, 58, 14, '#FFB3E6');
+        else {
+          var left = 1 - (r.rt % R.lowgrav.period - R.lowgrav.onAt) / (R.lowgrav.period - R.lowgrav.onAt);
+          g.fillStyle = '#000'; g.fillRect(NET_X - 41, 51, 82, 8); g.fillStyle = '#FF8AD8'; g.fillRect(NET_X - 40, 52, 80 * left, 6);
+          label(g, '低重力', NET_X, 66, 10, '#FFB3E6');
+        }
+      }
+    } else if (r.id === 'wind') {
+      var won = windOn(r.rt) && live, wwarn = windWarn(r.rt) && live, dir = r.dir;
+      if (won || (wwarn && t % 6 < 4)) {
+        g.save(); g.translate(NET_X, 60); g.scale(dir, 1);
+        g.fillStyle = won ? '#B2FF59' : '#FFFFFF'; g.strokeStyle = '#000'; g.lineWidth = 3;
+        g.beginPath(); g.moveTo(-26, -5); g.lineTo(8, -5); g.lineTo(8, -12); g.lineTo(26, 0); g.lineTo(8, 12); g.lineTo(8, 5); g.lineTo(-26, 5); g.closePath(); g.stroke(); g.fill();
+        g.restore();
+        label(g, wwarn ? '強風要來了！' : '強風', NET_X, 80, wwarn ? 13 : 10, won ? '#B2FF59' : '#fff');
+      }
+      if (won) {
+        g.strokeStyle = 'rgba(220,255,200,0.45)'; g.lineWidth = 1.5;
+        for (var w = 0, wn = lite ? 6 : 16; w < wn; w++) {
+          var wy = 40 + (w * 47) % 200, base = (w * 97 + t * 9) % (W + 80) - 40, wx = dir > 0 ? base : W - base;
+          g.beginPath(); g.moveTo(wx, wy); g.lineTo(wx - dir * (18 + (w % 3) * 8), wy); g.stroke();
+        }
+      }
+    } else if (r.id === 'gold') {
+      var nextGold = r.rally % R.gold.every === R.gold.first;
+      var serving = (c.state === c.beforeStartOfNextRound || c.state === c.afterEndOfRound) && nextGold && !c.gameEnded;
+      if (serving) { label(g, '黃金球！', NET_X, 112, 30, '#FFD54F'); label(g, '本球 2 分', NET_X, 140, 15, '#fff'); }
+      if (r.golden && c.state === c.round && !c.roundEnded) {
+        g.globalAlpha = 0.85; g.strokeStyle = '#FFD54F'; g.lineWidth = 3;
+        g.beginPath(); g.arc(ball.x, ball.y, 22 + Math.sin(t / 2) * 2, 0, Math.PI * 2); g.stroke(); g.globalAlpha = 1;
+        label(g, '2分', ball.x, ball.y - 30, 10, '#FFD54F');
+        if (r.rt < 400) label(g, '黃金球　本球 2 分', NET_X, 58, 11, '#FFD54F');
+      }
+      if (r.pop && ++r.pop.t < 30) label(g, '+2', r.pop.side === 1 ? 382 : 50, 62 - r.pop.t, 22, '#FFD54F');
+    }
+    if (def) label(g, '場地：' + def.name, NET_X, 44, 9, def.color);
+  }
+
   // ---------- 電腦強度：在遊戲本體和角色 AI 決定好按鍵之後，再依關卡把它調弱 ----------
   var innerAI = window._pvAI;
   window._pvAI = function (player, ball, opp, input) {
+    var r = camp.rule;
+    if (r && camp.playing && !camp.waiting && player.isComputer && (r.id === 'lowgrav' || r.id === 'wind')) {
+      var pred = predictLanding(ball, r);
+      if (pred != null && Math.abs(pred - ball.expectedLandingPointX) > 6) {
+        ball.expectedLandingPointX = pred;                     // 角色 AI（衝刺、瞬移）也照這個落點
+        var mineP = player.isPlayer2 ? pred >= NET_X : pred < NET_X;
+        if (mineP && player.state === 0) input.xDirection = Math.abs(pred - player.x) > 8 ? (pred > player.x ? 1 : -1) : 0;
+      }
+    }
     if (innerAI) innerAI(player, ball, opp, input);
     if (!camp.playing || camp.waiting || !player.isComputer) return;
     var d = player.isPlayer2 ? camp.diff : camp.proxy, m = player.isPlayer2 ? camp.ai2 : camp.ai1;
@@ -537,7 +755,9 @@
   var innerTick = window._pvTick;
   window._pvTick = function (c) {
     if (camp.playing && pre(c) === false) return false;
-    return innerTick ? innerTick(c) : undefined;
+    var res = innerTick ? innerTick(c) : undefined;
+    if (res !== false && camp.playing) rulePhysics(c);      // 只在這一幀真的有跑物理時才套規則（擊球停格的幀不算）
+    return res;
   };
 
   var hooked = false;
@@ -759,6 +979,7 @@
       for (var h2 = 0; h2 < CFG.hearts; h2++) heart(g, NET_X - 14 + h2 * 14, 14, 5.5, h2 < run.hearts - lostNow || (lostNow && h2 === run.hearts - 1 && k.t < 20 && k.t % 4 < 2));
       label(g, zoneOf(run.idx).name + '  ' + (run.idx + 1) + '/' + STAGES, NET_X, 30, 9, '#fff');
       label(g, '★', NET_X + 36, 14, 12, TIER[tierOf(run.lost)].color);
+      if (camp.rule && camp.playing) drawRule(c, g, camp.rule, t, lite);
     }
     if (k && !camp.waiting) drawKo(c, g, lite);
     else if (k && camp.waiting && k.win) confetti(g, t, 20);
@@ -877,6 +1098,8 @@
     '#pv-camp .vtop{display:flex;align-items:center;gap:10px;padding:6px 12px;flex:0 0 auto}',
     '#pv-camp .stg{font-weight:900;font-size:clamp(17px,5.4dvh,26px);transform:skew(-8deg);text-shadow:0 3px 0 rgba(0,0,0,.45);margin:0 auto}',
     '#pv-camp .stg small{font-size:.55em;opacity:.9;margin-left:8px;font-weight:800}',
+    '#pv-camp .rulep{flex:0 0 auto;align-self:center;max-width:92%;margin:6px auto 0;background:rgba(0,0,0,.6);border:2px solid var(--rc);border-radius:999px;padding:3px 14px;font-size:clamp(12px,3.6dvh,15px);font-weight:700;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;animation:pvc-pop .3s .5s both}',
+    '#pv-camp .rulep b{color:var(--rc);margin-right:8px}',
     '#pv-camp .arena{flex:1 1 auto;min-height:0;display:flex;align-items:center;justify-content:center;gap:clamp(8px,5vw,60px)}',
     '#pv-camp .ft{display:flex;flex-direction:column;align-items:center;position:relative}',
     '#pv-camp .ft .im{width:clamp(84px,min(34dvh,30vw),192px);height:clamp(84px,min(34dvh,30vw),192px)}',
@@ -1081,6 +1304,11 @@
     return h + '</div></div></div>';
   }
 
+  function ruleHtml(id) {
+    var d = id && RULES[id];
+    if (!d) return '';
+    return '<div class="rulep" style="--rc:' + d.color + '"><b>場地規則・' + esc(d.name) + '</b>' + esc(d.short) + '</div>';
+  }
   function vsHtml() {
     var run = save.run, idx = run.idx, z = zoneOf(idx), me = CH.byId[run.char], opp = CH.byId[run.order[idx]], B = CFG.boss;
     var tip = firstLine(opp.desc);
@@ -1089,7 +1317,7 @@
     var h = '<div class="scr vs" style="--c1:' + shade(me.color, 0.85) + ';--c1d:' + shade(me.color, 0.4) + ';--c2:' + shade(opp.color, 0.85) + ';--c2d:' + shade(opp.color, 0.4) + '">' +
       '<div class="hf l"></div><div class="hf r"></div>' +
       '<div class="vtop"><button class="bk" data-a="hub" type="button">‹ 路線圖</button><div class="stg">' + (z.boss ? '最終戰' : '第 ' + (idx + 1) + ' 關') + '<small>' + esc(z.name) + '</small></div><span class="chip" title="照目前的敗場，通關可以拿到的獎章"><b style="color:' + TIER[tierOf(run.lost)].color + '">★</b> 目前可拿' + TIER[tierOf(run.lost)].name + '獎章</span>' + heartsHtml(run.hearts) + '</div>' +
-      mapHtml(run, true, camp.travelFrom) +
+      mapHtml(run, true, camp.travelFrom) + ruleHtml(ruleFor(idx, opp.id)) +
       '<div class="arena"><div class="ft l"><div class="im"><i data-sp="' + me.id + '"></i></div><div class="nm">' + esc(me.name) + '</div></div>' +
       '<div class="vsx">VS</div>' +
       '<div class="ft r"><div class="im"><i data-sp="' + opp.id + '" data-c="flip"></i></div><div class="nm">' + esc(opp.name) + '</div>' + (owned(opp.id) ? '' : '<div class="tg">打倒就能收服！</div>') + '</div></div>' +
@@ -1314,7 +1542,7 @@
     } else if (a === 'fight') { startMatch(); }
     else if (a === 'more') {
       var run = save.run, opp = run && CH.byId[run.order[run.idx]];
-      if (opp) scr.querySelector('.scr').insertAdjacentHTML('beforeend', '<div class="more" data-a="less"><div><b style="color:' + opp.color + '">' + esc(opp.name) + '・' + esc(opp.skill) + '</b><br>' + esc(opp.desc) + '<br><small style="opacity:.6">點一下關閉</small></div></div>');
+      if (opp) scr.querySelector('.scr').insertAdjacentHTML('beforeend', '<div class="more" data-a="less"><div><b style="color:' + opp.color + '">' + esc(opp.name) + '・' + esc(opp.skill) + '</b><br>' + esc(opp.desc) + (ruleFor(run.idx, opp.id) ? '<br><br><b style="color:' + RULES[ruleFor(run.idx, opp.id)].color + '">場地規則・' + esc(RULES[ruleFor(run.idx, opp.id)].name) + '</b><br>' + esc(RULES[ruleFor(run.idx, opp.id)].desc) : '') + '<br><small style="opacity:.6">點一下關閉</small></div></div>');
     } else if (a === 'less') { var m = scr.querySelector('.more'); if (m) m.remove(); }
     else if (a === 'resume') { if (c) c.paused = false; hide(); }
     else if (a === 'quit') { if (c) c.paused = false; suspend(c, true); go('hub'); }
@@ -1370,7 +1598,8 @@
         sfx('tick');
         who.innerHTML = '<div><b>' + (nz.boss ? '最終戰' : '第 ' + (ni + 1) + ' 關') + '　' + esc(nz.name) + '</b><br><small>' +
           (seen && nid ? '對手：' + esc(charName(nid)) : '對手：到了才知道') + '　｜　' + (nz.boss ? '超夢 ' + CFG.boss.hp + ' 格血、分三階段' : '先得 ' + nz.score + ' 分') +
-          (nid && !owned(nid) ? '　｜　✦ 打倒可收服' : seen && nid ? '　｜　已是夥伴' : '') + '</small></div>';
+          (nid && !owned(nid) ? '　｜　✦ 打倒可收服' : seen && nid ? '　｜　已是夥伴' : '') +
+          (seen && nid && ruleFor(ni, nid) ? '　｜　場地：' + esc(RULES[ruleFor(ni, nid)].name) : '') + '</small></div>';
       }
     });
     // 鍵盤：Enter／空白／殺球鍵＝主要按鈕，Esc＝返回。攔在遊戲本體之前，免得同一下按鍵也被遊戲吃到
@@ -1437,10 +1666,18 @@
     cfg: CFG, state: camp, open: openFromMenu,
     playing: function () { return camp.playing && !camp.waiting; },
     save: function () { return save; },
-    owned: owned, medalTier: medalTier, tiers: TIER,
+    owned: owned, medalTier: medalTier, tiers: TIER, rules: RULES,
+    // 真人遊玩的紀錄：每一關「這一輪第一次挑戰就贏」的比例，和每一輪的敗場數
+    stats: function () {
+      var rows = Object.keys(save.stats).map(function (k) {
+        var p = k.split(':'), v = save.stats[k];
+        return { 關卡: +p[0] + 1, 對手: charName(p[1]), 場地: ruleFor(+p[0], p[1]) ? RULES[ruleFor(+p[0], p[1])].name : '', 第一次挑戰: v.t, 第一次就贏: v.w, 首勝率: v.t ? Math.round(v.w / v.t * 100) + '%' : '' };
+      }).sort(function (a, b) { return a.關卡 - b.關卡; });
+      return { 各關: rows, 通關紀錄: save.runs.map(function (r) { return { 角色: charName(r.c), 敗場: r.lost, 用時秒: Math.round(r.f / 25), 日期: r.d }; }) };
+    },
     // 測試用
     _test: { newRun: newRun, start: startMatch, suspend: function () { suspend(ctrlOf(), true); }, hook: hookCtrl, persist: persist, go: go,
-      acquire: playAcquire, clear: playClear, unlock: unlock }
+      acquire: playAcquire, clear: playClear, unlock: unlock, predict: predictLanding, ruleFor: ruleFor }
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();

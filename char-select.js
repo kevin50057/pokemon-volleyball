@@ -31,6 +31,7 @@
     '#pv-cs .card .sk{font-size:11px;opacity:.65;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
     '#pv-cs .card .ty{position:absolute;top:4px;left:5px;font-size:10px;font-weight:800;padding:0 5px;border-radius:6px;color:#111}',
     '#pv-cs .card .mk{position:absolute;top:3px;right:4px;font-size:10px;font-weight:800;padding:0 4px;border-radius:5px}',
+    '#pv-cs .card .cm{position:absolute;left:5px;bottom:2px;font-size:14px;text-shadow:0 1px 0 #000}',
     '#pv-cs .card .mk.p1{background:#42A5F5}#pv-cs .card .mk.p2{background:#FF7043;top:18px}',
     '#pv-cs .card.sel-p1{border-color:#42A5F5}#pv-cs .card.sel-p2{border-color:#FF7043}#pv-cs .card.sel-p1.sel-p2{border-color:#ce93d8}',
     '#pv-cs .desc{margin-top:10px;min-height:42px;padding:8px 12px;border-radius:10px;background:#141729;font-size:13px;line-height:1.55}',
@@ -61,7 +62,7 @@
           CH.ids.forEach(function (id) {
             if (sheetFor(id) !== name) return;
             var f = json.frames[id + '/' + id + '_0_0.png'];
-            if (f) portraits[id] = { img: img, frame: f.frame };
+            if (f) portraits[id] = { img: img, frame: f.frame, frames: json.frames };
           });
           waiting.slice().forEach(function (fn) { fn(); });
         };
@@ -78,6 +79,16 @@
     g.imageSmoothingEnabled = s < 1;   // 高解析貼圖（閃電鳥 96px）縮小時要平滑，像素圖放大時保持銳利
     g.drawImage(p.img, f.x, f.y, f.w, f.h,
       (canvas.width - f.w * s) / 2, (canvas.height - f.h * s) / 2, f.w * s, f.h * s);
+    return true;
+  }
+  // 畫某個動作的某一格（闖關模式的動畫用）；那一格不存在就畫頭像
+  function paintFrame(canvas, id, st, fr) {
+    var p = portraits[id], e = p && p.frames && p.frames[id + '/' + id + '_' + st + '_' + fr + '.png'];
+    if (!e) return paint(canvas, id);
+    var f = e.frame, g = canvas.getContext('2d'), s = Math.min(canvas.width / f.w, canvas.height / f.h);
+    g.clearRect(0, 0, canvas.width, canvas.height);
+    g.imageSmoothingEnabled = s < 1;
+    g.drawImage(p.img, f.x, f.y, f.w, f.h, (canvas.width - f.w * s) / 2, (canvas.height - f.h * s) / 2, f.w * s, f.h * s);
     return true;
   }
   function portrait(id, size) {
@@ -198,6 +209,10 @@
       card.querySelectorAll('.mk').forEach(function (m) { m.remove(); });
       if (sel[1] === id) card.insertAdjacentHTML('beforeend', '<span class="mk p1">1P</span>');
       if (sel[2] === id) card.insertAdjacentHTML('beforeend', '<span class="mk p2">2P</span>');
+      // 闖關通關過的角色：左下角一顆獎章（金／銀／銅）
+      var cm = card.querySelector('.cm'), PC = window.PV_Campaign, tier = PC && PC.medalTier ? PC.medalTier(id) : 0;
+      if (cm) cm.remove();
+      if (tier) card.insertAdjacentHTML('beforeend', '<span class="cm" style="color:' + PC.tiers[tier].color + '" title="闖關' + PC.tiers[tier].name + '獎章">★</span>');
     });
     showDesc(sel[activeP]);
   }
@@ -243,7 +258,7 @@
     }, true);
   }
 
-  window.PV_CharSelect = { open: open, close: close, current: current, portrait: portrait, toggle: function () { isOpen() ? close() : open(); } };
+  window.PV_CharSelect = { open: open, close: close, current: current, portrait: portrait, paintFrame: paintFrame, toggle: function () { isOpen() ? close() : open(); } };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 })();

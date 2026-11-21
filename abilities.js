@@ -193,6 +193,9 @@
     var next = pool[Math.floor(Math.random() * pool.length)];
     player.character = next;
     player.pvNoClamp = false;
+    // 變身不會經過「換角色」重設，御三家的判定寬度、速度倍率要在這裡清掉
+    player.pvReachX = 0;
+    player.pvMoveMult = player.pvDiveMult = undefined;
     m.transformedTo = next;
     state[pk(player)] = newSide();
     state[pk(player)].char = next;

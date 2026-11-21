@@ -76,6 +76,8 @@
     bulbasaurMove: 0.95, bulbasaurJump: 0.95, bulbasaurReach: 5, leafDrag: 1, leafGravEvery: 3,
     // 傑尼龜：走路、跳躍高度、殺球球速、撲救距離倍率、倒地少躺幾幀、硬殼（1 開 0 關）
     squirtleMove: 1.05, squirtleJump: 0.92, squirtleSpike: 0.95, squirtleDive: 1.15, squirtleGetup: 2, squirtleShell: 1,
+    // 月伊布：同步反彈的比例、月環掛幾幀（25 幀 ≈ 1 秒）、被月環套住時下一顆殺球剩幾成
+    umbreonSyncShare: 0.5, umbreonMarkFrames: 38, umbreonMarkSpike: 0.9,
     // 電腦防卡死：球在自己場上超過幾幀就強制起跳殺球
     antiStall: 100
   };
@@ -237,6 +239,8 @@
       starterMotion(p2);
       processBurn(p1, ball, 'p1');
       processBurn(p2, ball, 'p2');
+      processMoonMark(p1, ball, 'p1');
+      processMoonMark(p2, ball, 'p2');
       processDebuffs(p1, ctrl.keyboardArray[0], 'p1');
       processDebuffs(p2, ctrl.keyboardArray[1], 'p2');
       ballMem.prevPower = !!ball.isPowerHit;
@@ -287,6 +291,19 @@
       ball.isPowerHit = false;
       s.burnTimer = 0;
       pushBurst(ball.x, ball.y, '#9E9E9E', 45);
+    }
+  }
+
+  // 月伊布的月環：被套住的對手，下一顆殺球變弱（只算一次）。對手是誰都會跑（每幀兩邊都呼叫）
+  function processMoonMark(player, ball, key) {
+    var s = state[key];
+    // 沒有月環時什麼都不寫（不在每一邊的狀態上多出欄位：沒有月伊布的比賽、連線傳的資料都跟原本一模一樣）
+    if (!(s.moonMark > 0)) { if (s.moonHit) s.moonHit = false; return; }
+    s.moonMark--;
+    if (edge(s, 'moonHit', player.isCollisionWithBallHappened && player.state === 2) && ball.isPowerHit) {
+      scaleBall(ball, TUNING.umbreonMarkSpike);
+      s.moonMark = 0;
+      pushBurst(ball.x, ball.y, '#B39DDB', 40);
     }
   }
 
@@ -485,9 +502,55 @@
   }
 
   // ============================================================
+  // 月伊布：被動「同步」＋殺球「月環」
+  // ============================================================
+  // 同步：月伊布中了對手的異常狀態（定身、變慢、顛倒、灼傷），對手也會中同樣的狀態，
+  //       時間是一半；對手頭上掛著月環的時候是全額。
+  // 月環：月伊布的殺球帶月環。對手用身體接到（不是殺回來），頭上掛月環 1.5 秒；
+  //       這段時間內對手的下一顆殺球變弱（球速 ×0.9，只算一次，見 processMoonMark），而且同步反彈全額。
+  // 數值都在 TUNING（umbreon…）。
+  var UMB_KEYS = ['stunTimer', 'slowTimer', 'reverseTimer', 'burnTimer'];
+  // 記下這一幀結束時各個狀態的剩餘時間；下一幀變大了就是「剛中了新的」
+  function umbSnapshot(s) {
+    return { stunTimer: s.stunTimer || 0, slowTimer: s.slowTimer || 0, reverseTimer: s.reverseTimer || 0, burnTimer: s.burnTimer || 0 };
+  }
+
+  // ============================================================
   // 技能
   // ============================================================
   var ABILITIES = {
+    // 月伊布「同步＋月環」
+    synchronize: function (player, opp, ball, input, s, oppS) {
+      // ---- 同步 ----
+      var prev = s.umbPrev;
+      if (prev) {
+        var full = oppS.moonMark > 0;
+        UMB_KEYS.forEach(function (k) {
+          var now = s[k] || 0;
+          if (now > prev[k]) {
+            var add = Math.max(1, Math.round(now * (full ? 1 : TUNING.umbreonSyncShare)));
+            oppS[k] = Math.max(oppS[k] || 0, add);
+            if (k === 'stunTimer') oppS.stunX = opp.x;
+            // 對手也是月伊布：別讓它再反彈回來
+            if (oppS.umbPrev) oppS.umbPrev[k] = oppS[k];
+            pushBurst(opp.x, opp.y, '#7E57C2', 50);
+          }
+        });
+      }
+      // ---- 月環 ----
+      if (powerHitEdge(player, s, 'hit') && ball.isPowerHit) s.moonBall = 1;
+      if (s.moonBall) {
+        if (edge(s, 'oppTouch', opp.isCollisionWithBallHappened)) {
+          if (opp.state !== 2) {
+            oppS.moonMark = TUNING.umbreonMarkFrames;
+            pushBurst(opp.x, opp.y, '#FFD54F', 45);
+          }
+          s.moonBall = 0;
+        } else if (ball.y >= GROUND_BALL_Y - 2 || (player.isCollisionWithBallHappened && player.state !== 2)) s.moonBall = 0;
+      }
+      s.umbPrev = umbSnapshot(s);
+    },
+
     // 小火龍「小火苗」：靠網 1/3 的地方殺球，球速 +8%（底線殺球沒有）
     smallFlame: function (player, opp, ball, input, s) {
       if (!powerHitEdge(player, s, 'hit') || !ball.isPowerHit) return;
@@ -1254,6 +1317,12 @@
         var b = tick / 3 + k * Math.PI * 2 / 3;
         starIcon(g, x + Math.cos(b) * 13, top + Math.sin(b) * 4, 4, '#FFEB3B');
       }
+    }
+    if (s.moonMark > 0 && !(s.moonMark < 10 && s.moonMark % 4 < 2)) {   // 月伊布的月環：頭上一圈黃色的環
+      g.globalAlpha = 0.9; g.strokeStyle = '#000'; g.lineWidth = 4;
+      g.beginPath(); g.ellipse(x, top - 3, 11, 4, 0, 0, Math.PI * 2); g.stroke();
+      g.strokeStyle = '#FFD54F'; g.lineWidth = 2;
+      g.beginPath(); g.ellipse(x, top - 3, 11, 4, 0, 0, Math.PI * 2); g.stroke(); g.globalAlpha = 1;
     }
     if (s.slowTimer > 0) {             // 踩到金幣：頭上一枚轉動的金幣
       var sw = Math.abs(Math.cos(tick / 3)) * 4 + 1;

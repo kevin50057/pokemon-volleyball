@@ -110,6 +110,14 @@
       g.fillStyle = light; star(g, C, C, 4, 10, 2.5, -Math.PI / 2);
       g.fillStyle = '#FFFFFF'; circle(g, C, C, 2);
     },
+    // 惡：一彎新月，旁邊兩個小光環
+    '惡': function (g, main, light) {
+      g.fillStyle = main; circle(g, C, C, 12);
+      g.save(); g.globalCompositeOperation = 'destination-out'; circle(g, C + 6, C - 4, 10); g.restore();
+      g.strokeStyle = light; g.lineWidth = 2;
+      g.beginPath(); g.ellipse(C + 9, C + 8, 4, 2, 0, 0, Math.PI * 2); g.stroke();
+      g.beginPath(); g.ellipse(C + 12, C - 10, 3, 1.5, 0, 0, Math.PI * 2); g.stroke();
+    },
     // 草：往外飛的葉片
     '草': function (g, main, light) {
       for (var i = 0; i < 6; i++) {

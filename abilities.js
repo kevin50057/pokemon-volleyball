@@ -69,6 +69,13 @@
     redGyaradosChance: 0.1, redGyaradosFrames: 150, redGyaradosVx: 30, redGyaradosStun: 10,
     // 夢幻
     mewShieldCD: 500, mewTeleport: 110, mewTeleportCD: 150, mewTeleportAI: 0.005, mewLift: 15, mewChargeFrames: 45, mewBlastVx: 28,
+    // 關都御三家（一階，以皮卡丘為 1）
+    // 小火龍：走路倍率、撲救距離倍率、「網前」的範圍（離網幾 px 以內，半場寬 216 的 1/3）、網前殺球的球速倍率
+    charmanderMove: 1.03, charmanderDive: 1.10, charmanderNetZone: 72, charmanderNetSpike: 1.08,
+    // 妙蛙種子：走路、跳躍高度倍率、擊球判定左右加寬幾 px、飛葉過網時水平速度減多少、過網後每幾幀多加 1 重力
+    bulbasaurMove: 0.95, bulbasaurJump: 0.95, bulbasaurReach: 5, leafDrag: 1, leafGravEvery: 3,
+    // 傑尼龜：走路、跳躍高度、殺球球速、撲救距離倍率、倒地少躺幾幀、硬殼（1 開 0 關）
+    squirtleMove: 1.05, squirtleJump: 0.92, squirtleSpike: 0.95, squirtleDive: 1.15, squirtleGetup: 2, squirtleShell: 1,
     // 電腦防卡死：球在自己場上超過幾幀就強制起跳殺球
     antiStall: 100
   };
@@ -152,6 +159,8 @@
     ['player1', 'player2'].forEach(function (k) {
       var p = ctrl.physics[k];
       p.pvNoClamp = false;
+      p.pvReachX = 0;
+      p.pvMoveMult = p.pvDiveMult = undefined;
       var m = meta[pk(p)];
       if (m.origin === 'ditto') { p.character = 'ditto'; m.transformedTo = null; }
     });
@@ -215,8 +224,14 @@
       [p1, p2].forEach(function (p) {
         if (p.isCollisionWithBallHappened && ball.isPowerHit) ballMem.lastPowerSide = pk(p);
       });
+      var shell1 = shellMark(p1), shell2 = shellMark(p2);
       processAbility(p1, p2, ball, ctrl.keyboardArray[0], 'p1', ctrl);
       processAbility(p2, p1, ball, ctrl.keyboardArray[1], 'p2', ctrl);
+      // 御三家：傑尼龜的硬殼先還原被推開的位置，再算走路／撲救／跳躍的倍率
+      shellRestore(p1, shell1, state.p1);
+      shellRestore(p2, shell2, state.p2);
+      starterMotion(p1);
+      starterMotion(p2);
       processBurn(p1, ball, 'p1');
       processBurn(p2, ball, 'p2');
       processDebuffs(p1, ctrl.keyboardArray[0], 'p1');
@@ -279,6 +294,8 @@
       state[key] = s = newSide();
       s.char = player.character;
       player.pvNoClamp = false;
+      player.pvReachX = 0;
+      player.pvMoveMult = player.pvDiveMult = undefined;
     }
     var def = CHARS[player.character];
     if (!def || !def.ability) return;
@@ -365,9 +382,147 @@
   };
 
   // ============================================================
+  // 關都御三家（一階）：小火龍、妙蛙種子、傑尼龜
+  // ============================================================
+  // 設計上只比皮卡丘差 5%～15%，重點是手感不同；大招留給進化後。
+  // 數值都在 TUNING（charmander… / bulbasaur… / squirtle…），以皮卡丘為 1。
+  // 走路、撲救的倍率由 main.bundle.js 套用（player.pvMoveMult／pvDiveMult），
+  // 因為要用這一幀真正的方向；在這裡（物理之前）算會用到上一幀的按鍵，電腦會走過頭。
+  var JUMP_VY = 15;     // 起跳那一幀算完後的上升速度（本體給 -16，重力加 1）
+
+  // 走路、撲救的倍率（netplay.js 客機預測位置也用這個）
+  function starterMove(ch) {
+    return ch === 'charmander' ? TUNING.charmanderMove
+      : ch === 'bulbasaur' ? TUNING.bulbasaurMove
+        : ch === 'squirtle' ? TUNING.squirtleMove : 1;
+  }
+  function diveMult(ch) {
+    return ch === 'charmander' ? TUNING.charmanderDive : ch === 'squirtle' ? TUNING.squirtleDive : 1;
+  }
+  function jumpMult(ch) {
+    return ch === 'bulbasaur' ? TUNING.bulbasaurJump : ch === 'squirtle' ? TUNING.squirtleJump : 1;
+  }
+  // 跳躍高度的倍率換成起跳速度。本體的跳躍：第一幀上升 16，之後 15、14、…每幀少 1，
+  // 總高度 ≈ 16 + v(v+1)/2（v = 15 時是 136）。解 16 + v'(v'+1)/2 = 136 × 倍率。
+  function jumpVelocity(mult) {
+    var h = (16 + JUMP_VY * (JUMP_VY + 1) / 2) * mult - 16;
+    return (-1 + Math.sqrt(1 + 8 * h)) / 2;
+  }
+  // 走路、撲救、跳躍的倍率（每幀設定；換角色時 processAbility 會清掉）
+  function starterMotion(player) {
+    var ch = player.character;
+    if (ch !== 'charmander' && ch !== 'bulbasaur' && ch !== 'squirtle') return;
+    player.pvMoveMult = starterMove(ch);
+    player.pvDiveMult = diveMult(ch);
+    // 跳躍高度：只改從地上起跳的那一下（本體剛起跳的下一幀一定是 y = 地面 - 16、速度 -15）
+    var jm = jumpMult(ch);
+    if (jm !== 1 && player.state === 1 && player.yVelocity === -JUMP_VY && player.y === GROUND_Y - 16) {
+      player.yVelocity = -jumpVelocity(jm);
+    }
+  }
+  // 傑尼龜的硬殼：記下技能跑之前的位置，跑完之後把對手技能造成的推開、震飛還原
+  function shellMark(player) {
+    if (player.character !== 'squirtle' || !TUNING.squirtleShell) return null;
+    return { x: player.x, yVelocity: player.yVelocity };
+  }
+  function shellRestore(player, mark, s) {
+    if (!mark || player.character !== 'squirtle') return;
+    var blocked = false;
+    if (player.x !== mark.x) {
+      player.x = mark.x;
+      if (s.stunTimer > 0) s.stunX = player.x;   // 被炸到的定身照算，只是不會被炸開
+      blocked = true;
+    }
+    if (player.yVelocity < mark.yVelocity) {   // 被震飛（卡比獸落地）
+      player.yVelocity = mark.yVelocity;
+      blocked = true;
+    }
+    if (blocked) pushBurst(player.x, player.y, '#9CD8FF', 28);
+  }
+  function scaleBall(ball, k) {
+    var sx = ball.xVelocity < 0 ? -1 : 1, sy = ball.yVelocity < 0 ? -1 : 1;
+    ball.xVelocity = sx * Math.min(30, Math.round(Math.abs(ball.xVelocity) * k));
+    ball.yVelocity = sy * Math.min(30, Math.round(Math.abs(ball.yVelocity) * k));
+  }
+  // 粗略模擬球路（照遊戲本體的球：每幀先移動、重力 +1；撞牆反彈、碰網柱彈開）。
+  // 回傳「會乾淨地過網、在撞到對面底牆之前落在對面場內」。
+  function landsClean(x, y, vx, vy, fromP2) {
+    for (var f = 0; f < 120; f++) {
+      if (x + vx < 20 || x + vx > 432) return false;                       // 撞牆會彈回來
+      if (Math.abs(x - NET_X) < 25 && y > 176) return false;               // 碰到網柱
+      if (y + vy > GROUND_BALL_Y) return fromP2 ? x < NET_X : x > NET_X;   // 落地
+      y += vy; x += vx; vy += 1;
+    }
+    return false;
+  }
+  // 殺球加速：先試「水平、垂直都乘 k」，不行再試「落點不變、早一點落地」。
+  // 只有原本的球路就會乾淨落在對面、加速後也一樣時才改，免得加速反而掛網或撞牆彈回來。
+  function boostSafely(ball, fromP2, k) {
+    if (!landsClean(ball.x, ball.y, ball.xVelocity, ball.yVelocity, fromP2)) return false;
+    var vx0 = ball.xVelocity, vy0 = ball.yVelocity;
+    scaleBall(ball, k);
+    if ((ball.xVelocity !== vx0 || ball.yVelocity !== vy0) && landsClean(ball.x, ball.y, ball.xVelocity, ball.yVelocity, fromP2)) return true;
+    ball.xVelocity = vx0; ball.yVelocity = vy0;
+    hastenBall(ball, k);
+    if ((ball.xVelocity !== vx0 || ball.yVelocity !== vy0) && landsClean(ball.x, ball.y, ball.xVelocity, ball.yVelocity, fromP2)) return true;
+    ball.xVelocity = vx0; ball.yVelocity = vy0;
+    return false;
+  }
+  // 球速變快、落點不變：水平速度乘 k，再改垂直速度讓球早 1/k 的時間落在同一個地方。
+  // （直接把球速乘上去，球會飛太遠撞到後面的牆彈回來，模擬起來反而變弱。）
+  function hastenBall(ball, k) {
+    var drop = GROUND_BALL_Y - ball.y;
+    if (!(drop > 0)) return;
+    var vy = ball.yVelocity;
+    var t = -vy + Math.sqrt(vy * vy + 2 * drop);   // 解 y + vy·t + t²/2 = 地面
+    var tk = t / k;
+    if (!(tk > 1)) return;
+    ball.xVelocity = Math.max(-30, Math.min(30, Math.round(ball.xVelocity * k)));
+    ball.yVelocity = Math.max(-30, Math.min(30, Math.round((drop - tk * tk / 2) / tk)));
+  }
+
+  // ============================================================
   // 技能
   // ============================================================
   var ABILITIES = {
+    // 小火龍「小火苗」：靠網 1/3 的地方殺球，球速 +8%（底線殺球沒有）
+    smallFlame: function (player, opp, ball, input, s) {
+      if (!powerHitEdge(player, s, 'hit') || !ball.isPowerHit) return;
+      var fromNet = player.isPlayer2 ? player.x - NET_X : NET_X - player.x;
+      if (fromNet > TUNING.charmanderNetZone) return;
+      if (!boostSafely(ball, player.isPlayer2, TUNING.charmanderNetSpike)) return;
+      pushBurst(ball.x, ball.y, '#FF8A3D', 38);   // 常常會發動，只放小火花、不算技能級特效
+    },
+
+    // 妙蛙種子「短藤鞭」：判定左右加寬；「飛葉」：不按方向鍵殺球，過網後變慢、早一點落地
+    vineWhip: function (player, opp, ball, input, s) {
+      player.pvReachX = TUNING.bulbasaurReach;
+      // 不按方向鍵的殺球，本體給的球速一定是水平 ±10、垂直 0
+      if (powerHitEdge(player, s, 'hit') && ball.isPowerHit && Math.abs(ball.xVelocity) === 10 && ball.yVelocity === 0) {
+        s.leaf = 1; s.leafT = 0; s.leafCrossed = false;
+        return;
+      }
+      if (!s.leaf) return;
+      var crossed = player.isPlayer2 ? ball.x < NET_X : ball.x > NET_X;
+      if (opp.isCollisionWithBallHappened || ball.y >= GROUND_BALL_Y - 2 || (s.leafCrossed && !crossed)) { s.leaf = 0; return; }
+      if (!crossed) return;
+      if (!s.leafCrossed) {
+        s.leafCrossed = true;
+        var sx = ball.xVelocity < 0 ? -1 : 1;
+        ball.xVelocity = sx * Math.max(1, Math.abs(ball.xVelocity) - TUNING.leafDrag);
+        pushBurst(ball.x, ball.y, '#5FD35F', 30);
+      }
+      s.leafT = (s.leafT || 0) + 1;
+      if (s.leafT % TUNING.leafGravEvery === 0) ball.yVelocity += 1;
+    },
+
+    // 傑尼龜：殺球稍弱；撲救後起身快（滑行距離在 starterMotion，硬殼在 shellRestore）
+    shellSlide: function (player, opp, ball, input, s) {
+      if (powerHitEdge(player, s, 'hit') && ball.isPowerHit) scaleBall(ball, TUNING.squirtleSpike);
+      // 撲救落地那一幀本體把倒地時間設成 3，這裡少躺幾幀
+      if (player.state === 4 && player.lyingDownDurationLeft === 3) player.lyingDownDurationLeft -= TUNING.squirtleGetup;
+    },
+
     // 閃電鳥「雷擊俯衝」：同一次跳躍拍翅 3 次以上後殺球，球速加快、往下砸，而且帶電（對手接到會麻痺）
     flying: function (player, opp, ball, input, s, oppS) {
       var flaps = 6 - (player.flapsLeft || 0);

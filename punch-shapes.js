@@ -110,6 +110,16 @@
       g.fillStyle = light; star(g, C, C, 4, 10, 2.5, -Math.PI / 2);
       g.fillStyle = '#FFFFFF'; circle(g, C, C, 2);
     },
+    // 草：往外飛的葉片
+    '草': function (g, main, light) {
+      for (var i = 0; i < 6; i++) {
+        var a = i * Math.PI / 3 + 0.3;
+        g.fillStyle = main; drop(g, C, C, a, 5, 13, 4.5);
+        g.fillStyle = light; drop(g, C, C, a, 7, 8, 1.6);
+      }
+      g.fillStyle = main; circle(g, C, C, 5);
+      g.fillStyle = light; circle(g, C - 1, C - 1, 2.5);
+    },
     // 龍：三道爪痕
     '龍': function (g, main, light) {
       for (var i = -1; i <= 1; i++) {

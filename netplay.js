@@ -971,7 +971,8 @@
 
   function moveSpeed(ch) {
     var tu = window._pvAbilities && window._pvAbilities.tuning || {};
-    return 6 + (ch === 'jolteon' ? (tu.joltSpeed || 0) : ch === 'mewtwo' ? (tu.mewtwoSpeed || 0) : 0);
+    var starter = (ch === 'charmander' || ch === 'bulbasaur' || ch === 'squirtle') ? (tu[ch + 'Move'] || 1) : 1;
+    return 6 * starter + (ch === 'jolteon' ? (tu.joltSpeed || 0) : ch === 'mewtwo' ? (tu.mewtwoSpeed || 0) : 0);
   }
 
   function applySnap(c, s, fresh) {
